@@ -14,6 +14,7 @@ const state = {
   pending: false,
   scheduleDraft: null,
   gatewayCheck: null,
+  a71Inspection: null,
   writes: new Map(),
   energyPeriod: "w",
   efficiency: null,
@@ -900,6 +901,14 @@ function system(device) {
       <form id="gateway-check" class="inline-form"><label><span>Adapter IP address</span><input name="host" required inputmode="decimal" placeholder="192.168.1.42" value="${escapeHtml(gateway.host || "")}" autocomplete="off"></label><button class="primary">Check adapter</button></form>
       ${gateway.status === "reachable" ? `<p class="muted">${escapeHtml(gateway.model || "Daikin Wi-Fi adapter")} answered ${gateway.checkedAt ? escapeHtml(relativeTime(gateway.checkedAt)) : "just now"}.</p>` : gateway.status === "unreachable" ? `<p class="muted">No answer. Check the address and that this Mac is on your home Wi-Fi.</p>` : ""}
     </article>` : `<article class="panel"><header class="panel-head"><div><h2>Wi-Fi adapter</h2><p>This hosted dashboard talks only to Daikin's cloud and never reaches into your home network. Adapter checks are available from the dashboard on your Mac.</p></div><span class="status-dot local-only">Home network only</span></header></article>`;
+  const setupInspection = localReachability ? `<details class="panel credentials">
+      <summary><div><h2>Inspect A71 setup mode</h2><p>Looks for a local setup interface without changing registration, Wi-Fi or heat-pump settings.</p></div><span class="chip">Read only</span></summary>
+      <div class="settings-form">
+        <ol class="compact-steps"><li>Hold MODE on the BRP069A71 for about 2 seconds until AP flashes.</li><li>Connect this Mac to the <strong>daikin-ap</strong> Wi-Fi shown by the adapter.</li><li>Keep this local dashboard open and run the inspection.</li></ol>
+        <form id="a71-inspect" class="inline-form"><label><span>Setup gateway address</span><input name="host" required inputmode="decimal" value="192.168.10.1" autocomplete="off"></label><button class="primary">Inspect setup mode</button></form>
+        ${a71InspectionResult(state.a71Inspection)}
+      </div>
+    </details>` : `<article class="panel"><header class="panel-head"><div><h2>A71 setup-mode inspection</h2><p>For safety, this read-only check runs only from the local Mac dashboard while the Mac is connected to daikin-ap.</p></div><span class="status-dot local-only">Mac only</span></header></article>`;
   return `<section class="page">${pageHead("System", "Daikin account, API usage and the Wi-Fi adapter.", device)}${notices()}
     <div class="system-grid">
       <article class="panel">
@@ -918,8 +927,20 @@ function system(device) {
     </div>
     ${houseForm(settings.house || {})}
     ${gatewayCard}
+    ${setupInspection}
     ${cloud.connected ? `<details class="drawer danger-zone"><summary>Disconnect Daikin account</summary><div><p>Removes the saved Daikin sign-in from this dashboard. The heat pump stays in your Daikin account, and Daikin keeps the session active until it expires.</p><button class="danger" data-command="cloud-disconnect">Disconnect</button></div></details>` : ""}
   </section>`;
+}
+
+function a71InspectionResult(result) {
+  if (!result) return "";
+  if (!result.reachable) return `<div class="notice error"><strong>No setup interface answered.</strong> Confirm that AP is flashing and this Mac is connected to daikin-ap.</div>`;
+  const findings = result.findings || [];
+  const sockets = result.webSockets || [];
+  return `<div class="inspection-result"><p><strong>Adapter answered.</strong> ${escapeHtml(result.responses)} of ${escapeHtml(result.pathsChecked)} safe HTTP checks responded; ${escapeHtml(findings.length)} had a distinct result.</p>
+    ${findings.length ? `<dl class="facts">${findings.map((item) => `<div><dt>${escapeHtml(item.path)}</dt><dd>${escapeHtml(item.status)}${item.markers?.length ? ` · ${escapeHtml(item.markers.join(", "))}` : ""}${item.keys?.length ? ` · keys: ${escapeHtml(item.keys.join(", "))}` : ""}</dd></div>`).join("")}</dl>` : `<p class="muted">Every responding path returned the same embedded-server response. No readable setup or ownership interface was exposed.</p>`}
+    ${sockets.length ? `<p class="muted">Open WebSocket: ${escapeHtml(sockets.map((item) => item.path).join(", "))}</p>` : `<p class="muted">No tested WebSocket endpoint opened.</p>`}
+    <p class="muted">${escapeHtml(result.safety)}</p></div>`;
 }
 
 const HOUSE_OPTIONS = {
@@ -1112,6 +1133,16 @@ app.addEventListener("submit", async (event) => {
     } finally {
       state.pending = false;
     }
+    return;
+  }
+  if (form.matches("#a71-inspect")) {
+    const button = form.querySelector("button");
+    const host = new FormData(form).get("host");
+    await withPending(button, async () => {
+      state.a71Inspection = await request("/api/local/a71-inspect", { method: "POST", body: JSON.stringify({ host }) });
+      toast(state.a71Inspection.reachable ? "A71 setup interface inspected" : "A71 setup interface did not answer", !state.a71Inspection.reachable);
+      render();
+    });
     return;
   }
   if (form.matches("#house-settings")) {

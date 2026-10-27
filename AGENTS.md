@@ -47,6 +47,10 @@ Read these files before changing the project:
 - The installed A71 responds to UDP discovery on port 30050 and identifies its
   model, but no local heat-pump status/control API has been found. Known A61/A62
   `/mca`, legacy HTTP, and tested UDP control/status requests are unavailable.
+- A redacted, read-only A71 setup-mode inspector is available in the local
+  System page and as `npm run inspect:a71 -- 192.168.10.1`. It sends only
+  bounded GETs and empty WebSocket handshakes; it has not yet been run while
+  the Mac is connected to `daikin-ap`.
 - The Mac dashboard remains available locally and retains LAN probing. The
   hosted runtime deliberately disables LAN reachability and uses ONECTA only.
 
@@ -90,9 +94,11 @@ redacted payload before adding model-specific assumptions.
 4. Make **Disconnect cloud** revoke tokens at Daikin. `disconnect()` currently
    only deletes the locally stored tokens; treat that as a documented gap until
    it is fixed and tested.
-5. Continue optional A71 protocol research only as scoped in
+5. Run the read-only A71 setup-mode inspection while the Mac is connected to
+   `daikin-ap`; review the exact result before authorizing any state change.
+6. Continue optional A71 protocol research only as scoped in
    `RESEARCH_STATUS.md`.
-6. Run the energy review in `docs/EFFICIENCY_PLAYBOOK.md` once the device
+7. Run the energy review in `docs/EFFICIENCY_PLAYBOOK.md` once the device
    appears. Suggestions stay proposals: change one setting at a time, only
    with the owner's approval.
 

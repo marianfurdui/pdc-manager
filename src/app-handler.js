@@ -211,6 +211,11 @@ export async function createRequestHandler({
       await store.write(settings);
       return sendJson(response, 200, result);
     }
+    if (request.method === "POST" && url.pathname === "/api/local/a71-inspect") {
+      if (!localEnabled) throw new AppError("A71 setup inspection requires the dashboard running on your Mac", 409, "LOCAL_NETWORK_REQUIRED");
+      const body = await readJson(request);
+      return sendJson(response, 200, await local.inspectSetup(body.host || "192.168.10.1"));
+    }
     if (request.method === "GET" && url.pathname === "/api/cloud/connect") {
       const redirectUri = `${publicBaseUrl(request)}/oauth/callback`;
       response.writeHead(302, { location: await cloud.authorizationUrl(redirectUri), "cache-control": "no-store" });

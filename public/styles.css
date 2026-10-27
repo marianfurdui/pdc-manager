@@ -302,6 +302,9 @@ label > span { display: block; margin-bottom: 6px; color: var(--muted); font-siz
 .credentials summary p { margin-top: 4px; color: var(--muted); font-size: 14px; }
 .settings-form { display: grid; gap: 14px; margin-top: 20px; }
 .inline-form { display: grid; grid-template-columns: minmax(0, 360px) auto; gap: 10px; align-items: end; margin: 18px 0 10px; }
+.compact-steps { display: grid; gap: 8px; margin: 0; padding-left: 22px; color: var(--muted); font-size: 14px; }
+.inspection-result { display: grid; gap: 8px; margin-top: 6px; }
+.inspection-result .facts dd { max-width: 70%; overflow-wrap: anywhere; text-align: right; }
 .danger-zone > div { display: grid; justify-items: start; gap: 14px; padding: 0 24px 20px; }
 .danger-zone p { max-width: 62ch; color: var(--muted); font-size: 14px; }
 

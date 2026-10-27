@@ -39,6 +39,33 @@ See
 [`RESEARCH_STATUS.md`](RESEARCH_STATUS.md) for the verified network evidence,
 deployment context, exact implementation status, known gaps, and next steps.
 
+### Inspect the A71 setup network without changing it
+
+The Mac dashboard now has **System → Inspect A71 setup mode**. This is a
+bounded, read-only check of the adapter's temporary `daikin-ap` network. It
+sends HTTP `GET` requests only to information/status/setup paths and opens
+WebSocket handshakes without sending frames. It never calls reset, register,
+remove, delete, or setting endpoints.
+
+1. Run the local dashboard with `npm start` and leave it open.
+2. Hold **MODE** on BRP069A71 for about two seconds until AP flashes.
+3. Connect the Mac to `daikin-ap` using the password supplied by ONECTA.
+4. In the local dashboard open **System → Inspect A71 setup mode** and use the
+   default gateway `192.168.10.1`.
+5. Reconnect the Mac to the home Wi-Fi afterward and hold **MODE** again if the
+   adapter does not leave AP mode itself.
+
+The same inspection can be run from Terminal:
+
+```sh
+npm run inspect:a71 -- 192.168.10.1
+```
+
+The output contains response structure, hashes, key names and route hints—not
+SSID, MAC address, account identifiers, registration values or response-body
+content. A discovered state-changing ownership endpoint must be reviewed and
+explicitly approved before it is called.
+
 ## Your hardware: BRP069A71
 
 The supplied front and rear photos identify the installed adapter as:

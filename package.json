@@ -7,8 +7,9 @@
   "scripts": {
     "start": "node src/local-server.js",
     "dev": "DEMO_MODE=true node --watch src/local-server.js",
+    "inspect:a71": "node scripts/inspect-a71-setup.mjs",
     "test": "node --test",
-    "check": "node --check src/local-server.js && node --check src/app-handler.js && node --check src/lib/redis-store.js && node --check api/index.js && node --check public/app.js && node --check scripts/efficiency-audit.mjs"
+    "check": "node --check src/local-server.js && node --check src/app-handler.js && node --check src/lib/redis-store.js && node --check api/index.js && node --check public/app.js && node --check scripts/efficiency-audit.mjs && node --check scripts/inspect-a71-setup.mjs"
   },
   "engines": {
     "node": "22.x"

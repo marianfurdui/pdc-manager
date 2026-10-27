@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyCloudGatewayHttp, marshallSchedule, unmarshallSchedule, validateLocalHost } from "../src/connectors/local-altherma.js";
+import { classifyCloudGatewayHttp, marshallSchedule, summarizeA71Response, unmarshallSchedule, validateLocalHost } from "../src/connectors/local-altherma.js";
 
 test("local host validation accepts only private targets", () => {
   assert.equal(validateLocalHost("192.168.1.42"), "192.168.1.42");
@@ -41,4 +41,15 @@ test("cloud-only Daikin HTTP service is reported as reachable without claiming c
     note: "The gateway is reachable on the LAN, but it does not expose a local heat-pump status or control API.",
   });
   assert.equal(classifyCloudGatewayHttp(200, "OK", 404, "not_found"), null);
+});
+
+test("A71 setup responses expose structure without values", () => {
+  const summary = summarizeA71Response("/common/basic_info", 200, "text/plain; charset=utf-8", "ret=OK,ssid=PrivateNetwork,mac=001122334455,registered=true,owner=secret-user");
+  assert.equal(summary.path, "/common/basic_info");
+  assert.equal(summary.status, 200);
+  assert.deepEqual(summary.keys, ["ret", "ssid", "mac", "registered", "owner"]);
+  assert.ok(summary.markers.includes("registered"));
+  assert.ok(summary.markers.includes("owner"));
+  assert.equal(JSON.stringify(summary).includes("PrivateNetwork"), false);
+  assert.equal(JSON.stringify(summary).includes("secret-user"), false);
 });

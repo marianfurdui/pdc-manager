@@ -94,3 +94,18 @@ test("efficiency without a connection or history is empty, not an error", async 
     await server.close();
   }
 });
+
+test("hosted runtime refuses A71 LAN inspection", async () => {
+  const server = await serve({ store: memoryStore(), localEnabled: false, runtime: "vercel" });
+  try {
+    const response = await fetch(`${server.url}/api/local/a71-inspect`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).error, "LOCAL_NETWORK_REQUIRED");
+  } finally {
+    await server.close();
+  }
+});
