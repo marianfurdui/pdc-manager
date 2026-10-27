@@ -56,14 +56,18 @@ export function sanitizeHouse(input = {}) {
   if (input.rooms !== undefined) {
     if (!Array.isArray(input.rooms) || input.rooms.length > 30) throw new AppError("Up to 30 rooms can be saved", 400, "INVALID_HOUSE");
     house.rooms = input.rooms
-      .map((room) => ({ name: String(room?.name ?? "").replace(/[\u0000-\u001f]/g, "").trim().slice(0, 40), area: room?.area, target: room?.target }))
+      // `target` is the older single-temperature field and is read as day.
+      .map((room) => ({ name: String(room?.name ?? "").replace(/[\u0000-\u001f]/g, "").trim().slice(0, 40), area: room?.area, day: room?.day ?? room?.target, night: room?.night }))
       .filter((room) => room.name || (room.area !== "" && room.area !== undefined && room.area !== null))
       .map((room, index) => {
         const area = Number(room.area);
-        const target = Number(room.target);
+        const day = Number(room.day);
+        const hasNight = room.night !== "" && room.night !== undefined && room.night !== null;
+        const night = Number(room.night);
         if (!Number.isFinite(area) || area < 1 || area > 300) throw new AppError(`Room ${index + 1}: area must be between 1 and 300 m²`, 400, "INVALID_HOUSE");
-        if (!Number.isFinite(target) || target < 5 || target > 28) throw new AppError(`Room ${index + 1}: temperature must be between 5 and 28 °C`, 400, "INVALID_HOUSE");
-        return { name: room.name || `Room ${index + 1}`, area: Math.round(area * 10) / 10, target: Math.round(target * 2) / 2 };
+        if (!Number.isFinite(day) || day < 5 || day > 28) throw new AppError(`Room ${index + 1}: day temperature must be between 5 and 28 °C`, 400, "INVALID_HOUSE");
+        if (hasNight && (!Number.isFinite(night) || night < 5 || night > 28)) throw new AppError(`Room ${index + 1}: night temperature must be between 5 and 28 °C`, 400, "INVALID_HOUSE");
+        return { name: room.name || `Room ${index + 1}`, area: Math.round(area * 10) / 10, day: Math.round(day * 2) / 2, ...(hasNight ? { night: Math.round(night * 2) / 2 } : {}) };
       });
     if (!house.rooms.length) delete house.rooms;
   }

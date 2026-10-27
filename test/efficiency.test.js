@@ -148,6 +148,24 @@ test("rooms kept well below the main rooms are named for balancing", () => {
   assert.equal(ids(evaluate({ devices: [device()], house: { rooms: even }, journal: emptyJournal(), now: winter })).includes("room-balance"), false);
 });
 
+test("rooms dropped deeply at night are listed, deepest first", () => {
+  const nightRooms = [
+    { name: "Living", area: 40, day: 21, night: 20 },
+    { name: "Bedroom", area: 16, day: 21, night: 18 },
+    { name: "Office", area: 10, day: 19, night: 16 },
+    { name: "Bath", area: 7, day: 19 },
+  ];
+  const item = evaluate({ devices: [device()], house: { rooms: nightRooms }, journal: emptyJournal(), now: winter }).findings.find((finding) => finding.id === "room-night-setback");
+  assert.equal(item.evidence, "Bedroom 21°C to 18°C, Office 19°C to 16°C.");
+  const gentle = nightRooms.map((room) => ({ ...room, night: room.day - 1 }));
+  assert.equal(ids(evaluate({ devices: [device()], house: { rooms: gentle }, journal: emptyJournal(), now: winter })).includes("room-night-setback"), false);
+});
+
+test("day temperatures drive the balancing check", () => {
+  const dayNight = rooms.map(({ target, ...room }) => ({ ...room, day: target, night: target - 1 }));
+  assert.ok(ids(evaluate({ devices: [device()], house: { rooms: dayNight }, journal: emptyJournal(), now: winter })).includes("room-balance"));
+});
+
 test("per-room data changes the thermostat advice", () => {
   const item = evaluate({ devices: [device()], house: { roomThermostats: "all", rooms }, journal: emptyJournal(), now: winter }).findings.find((finding) => finding.id === "room-thermostats");
   assert.match(item.suggestion, /each room's thermostat/);

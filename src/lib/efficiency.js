@@ -59,6 +59,8 @@ export const INSTALLER_CHECKLIST = [
 ];
 
 const SEVERITY_ORDER = { warn: 0, suggest: 1, info: 2 };
+// Rooms saved before day/night temperatures existed carry a single `target`.
+const dayTemp = (room) => (Number.isFinite(room.day) ? room.day : room.target);
 const median = (values) => {
   if (!values.length) return null;
   const sorted = [...values].sort((a, b) => a - b);
@@ -273,7 +275,7 @@ const rules = [
   },
 
   function roomBalance({ house, emitters }) {
-    const rooms = (house?.rooms || []).filter((room) => Number.isFinite(room.target) && Number.isFinite(room.area));
+    const rooms = (house?.rooms || []).map((room) => ({ ...room, target: dayTemp(room) })).filter((room) => Number.isFinite(room.target) && Number.isFinite(room.area));
     if (rooms.length < 2 || !["underfloor", "mixed"].includes(emitters)) return [];
     const main = rooms.filter((room) => room.area >= THRESHOLDS.mainRoomArea);
     const reference = Math.max(...(main.length ? main : rooms).map((room) => room.target));
@@ -304,6 +306,19 @@ const rules = [
       : "Enter the house altitude in System → Your home. Without it the weather data uses the altitude of a point up to 10 km away.";
     return [finding("weather-offset", "info", `The heat pump's outdoor sensor reads ${fmt(Math.abs(sensor.offset))}°C ${warmer ? "warmer" : "colder"} than the weather data`,
       `Median difference over ${sensor.readings} readings on ${sensor.days} days.`, advice)];
+  },
+
+  function roomNightSetback({ house, emitters }) {
+    const limit = THRESHOLDS.setbackMax[emitters] ?? 1;
+    const deep = (house?.rooms || [])
+      .filter((room) => Number.isFinite(dayTemp(room)) && Number.isFinite(room.night) && dayTemp(room) - room.night > limit)
+      .sort((a, b) => (dayTemp(b) - b.night) - (dayTemp(a) - a.night));
+    if (!deep.length) return [];
+    return [finding("room-night-setback", "suggest", "Some room thermostats drop the temperature a lot at night",
+      `${deep.map((room) => `${room.name} ${fmt(dayTemp(room))}°C to ${fmt(room.night)}°C`).join(", ")}.`,
+      emitters === "underfloor" || emitters === "mixed"
+        ? `A floor takes hours to cool and reheat, so a deep night drop mostly shuts the loop overnight and then forces a hard morning recovery. Keep the night drop to about ${limit}°C, or none in the largest rooms.`
+        : `Keep the night drop to about ${limit}°C so morning recovery doesn't need very hot water.`)];
   },
 
   function floorLoss({ house, emitters }) {

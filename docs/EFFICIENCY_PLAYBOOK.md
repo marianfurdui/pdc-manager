@@ -50,7 +50,10 @@ bedrooms about 21 °C, two bathrooms 19 °C, office 19 °C, a small bedroom
 the cooler rooms' thermostats will hold their loops shut much of the time.
 Balancing the manifold so those loops get less flow, rather than switching
 on and off, is likely the first practical change (the `room-balance`
-rule). Room areas go into **System → Your home → Rooms**.
+rule). The room thermostats have separate day and night temperatures;
+night drops deeper than about 1 °C are flagged per room
+(`room-night-setback`). Room areas and both temperatures go into
+**System → Your home → Rooms**.
 
 With walls around 0.16 W/m²K, the windows (around 1.1–1.4 W/m²K even if
 modern, which these are) and the floor over the unheated basement are probably where most

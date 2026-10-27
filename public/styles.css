@@ -268,7 +268,7 @@ label > span { display: block; margin-bottom: 6px; color: var(--muted); font-siz
 .rooms { display: grid; gap: 10px; }
 .rooms .muted { margin: 0; }
 .room-list { display: grid; gap: 8px; }
-.room-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) 40px; gap: 8px; align-items: end; }
+.room-row { display: grid; grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr)) 40px; gap: 8px; align-items: end; }
 .rooms .add-change { justify-self: start; min-height: 44px; }
 
 /* ---------- Waiting ---------- */
@@ -354,6 +354,6 @@ label > span { display: block; margin-bottom: 6px; color: var(--muted); font-siz
   .finding-actions { flex-direction: row; align-items: center; }
   .location-row { grid-template-columns: 1fr 1fr 1fr; }
   .location-row .secondary { grid-column: 1 / -1; }
-  .room-row { grid-template-columns: 1fr 1fr 40px; padding-bottom: 10px; border-bottom: 1px solid var(--rule); }
+  .room-row { grid-template-columns: 1fr 1fr 1fr 40px; padding-bottom: 10px; border-bottom: 1px solid var(--rule); }
   .room-row label:first-child { grid-column: 1 / -1; }
 }

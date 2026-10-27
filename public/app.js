@@ -934,7 +934,7 @@ const HOUSE_OPTIONS = {
 const HOUSE_DEFAULTS = { emitters: "underfloor", tariff: "flat", solar: "none", insulation: "new", roomThermostats: "all", belowFloor: "basement", ventilation: "windows" };
 
 function roomRow(room = {}) {
-  return `<div class="room-row"><label><span>Room</span><input name="roomName" maxlength="40" value="${escapeHtml(room.name ?? "")}" autocomplete="off"></label><label><span>Area (m²)</span><input name="roomArea" type="number" min="1" max="300" step="0.1" inputmode="decimal" value="${escapeHtml(room.area ?? "")}"></label><label><span>Temperature (°C)</span><input name="roomTarget" type="number" min="5" max="28" step="0.5" inputmode="decimal" value="${escapeHtml(room.target ?? "")}"></label><button type="button" class="remove-button" data-command="house-remove-room" aria-label="Remove room"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17"/></svg></button></div>`;
+  return `<div class="room-row"><label><span>Room</span><input name="roomName" maxlength="40" value="${escapeHtml(room.name ?? "")}" autocomplete="off"></label><label><span>Area (m²)</span><input name="roomArea" type="number" min="1" max="300" step="0.1" inputmode="decimal" value="${escapeHtml(room.area ?? "")}"></label><label><span>Day (°C)</span><input name="roomDay" type="number" min="5" max="28" step="0.5" inputmode="decimal" value="${escapeHtml(room.day ?? room.target ?? "")}"></label><label><span>Night (°C)</span><input name="roomNight" type="number" min="5" max="28" step="0.5" inputmode="decimal" placeholder="Same" value="${escapeHtml(room.night ?? "")}"></label><button type="button" class="remove-button" data-command="house-remove-room" aria-label="Remove room"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17"/></svg></button></div>`;
 }
 
 function houseForm(house) {
@@ -965,7 +965,7 @@ function houseForm(house) {
         ${select("ventilation", "Fresh air comes from")}
       </div>
       <fieldset class="rooms"><legend>Rooms</legend>
-        <p class="muted">Each heated room's floor area and the temperature you keep it at. Rooms kept much cooler than the rest affect how the floor loops should be balanced.${house.rooms?.length ? ` Saved rooms add up to ${escapeHtml(formatNumber(house.rooms.reduce((sum, room) => sum + room.area, 0)))} m².` : ""}</p>
+        <p class="muted">Each heated room's floor area and its thermostat's day and night temperatures. Leave night empty if it doesn't change. Rooms kept much cooler than the rest, or dropped a lot at night, affect how the floor loops should be balanced.${house.rooms?.length ? ` Saved rooms add up to ${escapeHtml(formatNumber(house.rooms.reduce((sum, room) => sum + room.area, 0)))} m².` : ""}</p>
         <div class="room-list">${(house.rooms?.length ? house.rooms : [{}]).map(roomRow).join("")}</div>
         <button type="button" class="add-change" data-command="house-add-room">Add room</button>
       </fieldset>
@@ -1117,10 +1117,11 @@ app.addEventListener("submit", async (event) => {
     const data = new FormData(form);
     const names = data.getAll("roomName");
     const areas = data.getAll("roomArea");
-    const targets = data.getAll("roomTarget");
-    for (const key of ["roomName", "roomArea", "roomTarget"]) data.delete(key);
+    const days = data.getAll("roomDay");
+    const nights = data.getAll("roomNight");
+    for (const key of ["roomName", "roomArea", "roomDay", "roomNight"]) data.delete(key);
     const house = Object.fromEntries(data);
-    house.rooms = names.map((name, index) => ({ name, area: areas[index], target: targets[index] }));
+    house.rooms = names.map((name, index) => ({ name, area: areas[index], day: days[index], night: nights[index] }));
     house.timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     await withPending(form.querySelector("button:not([type])"), async () => {
       await request("/api/settings", { method: "PUT", body: JSON.stringify({ house }) });
