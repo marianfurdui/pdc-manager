@@ -20,6 +20,7 @@ one at a time, with a measurement period after each change.
 | Walls | 36 cm BCA (autoclaved aerated concrete) + 10 cm basalt wool | Owner; U ≈ 0.16 W/m²K estimated |
 | Roof | 25 cm basalt wool | Owner; U ≈ 0.14–0.18 W/m²K estimated, depending on rafter bridging |
 | Windows | Double glazing, 6 mm panes, low-e with argon fill, wood frames, about 6 years old (c. 2020) | Owner; Ug ≈ 1.1 and Uw ≈ 1.2–1.3 W/m²K estimated |
+| Altitude | 482 m | Owner; entered in the home profile so weather data is corrected for it |
 | Heated area | About 160 m² over two floors | Owner; ground floor over the basement assumed about 80 m² |
 | Below the heated floor | Unheated basement without floor heating, 5 cm insulation under the heated slab | Owner; floor U ≈ 0.5–0.6 W/m²K estimated |
 | Ventilation | Opening windows only | Owner |
