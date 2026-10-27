@@ -44,13 +44,20 @@ Read these files before changing the project:
 - ONECTA onboarding reports `ALREADY_REGISTERED_TO_OTHER`. Daikin support has
   been asked to release the stale gateway ownership. This is the immediate
   blocker to reading or controlling the real heat pump.
-- The installed A71 responds to UDP discovery on port 30050 and identifies its
-  model, but no local heat-pump status/control API has been found. Known A61/A62
-  `/mca`, legacy HTTP, and tested UDP control/status requests are unavailable.
-- A redacted, read-only A71 setup-mode inspector is available in the local
-  System page and as `npm run inspect:a71 -- 192.168.10.1`. It sends only
-  bounded GETs and empty WebSocket handshakes; it has not yet been run while
-  the Mac is connected to `daikin-ap`.
+- The installed A71 responds to UDP discovery and to its ONECTA provisioning
+  API on the home LAN. Verified read-only routes expose redacted adapter,
+  product, firmware, and WLAN metadata. They do not expose heat-pump
+  temperatures, schedules, or controls; `/mca`, legacy HTTP, and tested UDP
+  control/status requests remain unavailable.
+- Static inspection of the current ONECTA Android bundle identified the exact
+  A71 routes. The local System page now reads the safe GET routes while AP is
+  off and RUN is solid. IDs, MAC, IP, serial, and SSID values stay suppressed.
+- The adapter reports `connected` and has a non-empty cloud identity. The app's
+  onboarding code determines “registered to other” by comparing that identity
+  with the authorized account's gateway list. No local cloud-ownership removal
+  route was found. ONECTA's server-side DELETE is used only for gateways listed
+  in the signed-in account, which is empty here. Identified POST/PUT setup
+  routes remain uncalled.
 - The Mac dashboard remains available locally and retains LAN probing. The
   hosted runtime deliberately disables LAN reachability and uses ONECTA only.
 
@@ -94,11 +101,9 @@ redacted payload before adding model-specific assumptions.
 4. Make **Disconnect cloud** revoke tokens at Daikin. `disconnect()` currently
    only deletes the locally stored tokens; treat that as a documented gap until
    it is fixed and tested.
-5. Run the read-only A71 setup-mode inspection while the Mac is connected to
-   `daikin-ap`; review the exact result before authorizing any state change.
-6. Continue optional A71 protocol research only as scoped in
+5. Continue optional A71 protocol research only as scoped in
    `RESEARCH_STATUS.md`.
-7. Run the energy review in `docs/EFFICIENCY_PLAYBOOK.md` once the device
+6. Run the energy review in `docs/EFFICIENCY_PLAYBOOK.md` once the device
    appears. Suggestions stay proposals: change one setting at a time, only
    with the owner's approval.
 

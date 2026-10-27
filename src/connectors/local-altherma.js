@@ -6,13 +6,12 @@ const DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday"
 const SHORT_DAYS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
 
 const A71_READ_ONLY_PATHS = [
-  "/", "/index.html", "/status", "/version", "/info",
-  "/common/basic_info", "/common/get_version", "/common/get_wifi_setting",
-  "/common/get_network_info", "/common/get_remote_method", "/common/get_regist_info",
-  "/common/get_device_info", "/common/get_unit_info",
-  "/device/info", "/gateway/info", "/system/info",
-  "/wifi", "/wifi/scan", "/network", "/config", "/configuration", "/setup",
-  "/api", "/api/status", "/api/device", "/api/wifi", "/v1/status", "/dsiot/multireq",
+  "/config/adapter/info",
+  "/config/adapter/product_info",
+  "/config/firmware/info",
+  "/config/wlan/networks",
+  "/",
+  "/common/basic_info",
 ];
 const A71_MARKERS = ["wifi", "network", "cloud", "registration", "registered", "owner", "device", "firmware", "setup", "provision", "gateway", "websocket"];
 
@@ -194,9 +193,14 @@ export function classifyCloudGatewayHttp(rootStatus, rootBody, basicStatus, basi
 
 export function summarizeA71Response(path, status, contentType, body) {
   const text = String(body || "");
+  const escapedPath = String(path).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const normalizedText = text
+    .replace(new RegExp(`(File\\s+)${escapedPath}(\\s+(?:not_found|not found))`, "gi"), "$1<request-path>$2")
+    .replace(new RegExp(`((?:Cannot|Can not)\\s+(?:GET|HEAD|OPTIONS)\\s+)${escapedPath}(?=\\s|$)`, "gi"), "$1<request-path>");
   const keys = new Set();
+  let parsed;
   try {
-    const parsed = JSON.parse(text);
+    parsed = JSON.parse(text);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) Object.keys(parsed).forEach((key) => keys.add(key.slice(0, 64)));
   } catch { /* not JSON */ }
   for (const match of text.matchAll(/(?:^|[,;\n\r])\s*([a-z][a-z0-9_.-]{0,63})\s*=/gi)) keys.add(match[1]);
@@ -209,16 +213,34 @@ export function summarizeA71Response(path, status, contentType, body) {
       if (route.startsWith("/") && !route.includes("..")) routes.add(route.slice(0, 120));
     } catch { /* ignore malformed markup */ }
   }
-  const lower = text.toLowerCase();
+  const lower = normalizedText.toLowerCase();
+  const details = {};
+  const keepScalar = (outputKey, inputKey) => {
+    const value = parsed?.[inputKey];
+    if (["string", "number", "boolean"].includes(typeof value) && String(value).length <= 64) details[outputKey] = value;
+  };
+  if (path === "/config/adapter/info") {
+    keepScalar("status", "status");
+    keepScalar("udpDiscovery", "udpDiscovery");
+    keepScalar("wifiAuthenticationType", "wifiAuthenticationType");
+    details.cloudIdentityPresent = typeof parsed?.gatewayDeviceId === "string" && parsed.gatewayDeviceId.length > 0;
+  } else if (path === "/config/adapter/product_info") {
+    keepScalar("model", "model_name");
+    keepScalar("region", "region");
+    keepScalar("deviceType", "device_type");
+  } else if (path === "/config/firmware/info") {
+    keepScalar("version", "version");
+  }
   return {
     path,
     status,
     contentType: String(contentType || "").split(";")[0] || null,
     bytes: Buffer.byteLength(text),
-    fingerprint: crypto.createHash("sha256").update(text).digest("hex").slice(0, 12),
+    fingerprint: crypto.createHash("sha256").update(normalizedText).digest("hex").slice(0, 12),
     keys: [...keys].slice(0, 24),
     routes: [...routes].slice(0, 16),
     markers: A71_MARKERS.filter((marker) => lower.includes(marker)),
+    details,
   };
 }
 
@@ -251,51 +273,28 @@ async function inspectHttpPath(base, path) {
   }
 }
 
-async function inspectWebSocket(host, path) {
-  if (typeof WebSocket === "undefined") return { path, open: false, reason: "WebSocket unavailable in this Node version" };
-  return new Promise((resolve) => {
-    const socket = new WebSocket(`ws://${host}${path}`);
-    let settled = false;
-    let timer;
-    const finish = (result) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      try { socket.close(); } catch { /* already closed */ }
-      resolve({ path, ...result });
-    };
-    timer = setTimeout(() => finish({ open: false, reason: "timeout" }), 1_800);
-    socket.addEventListener("open", () => finish({ open: true }), { once: true });
-    socket.addEventListener("error", () => finish({ open: false, reason: "unavailable" }), { once: true });
-  });
-}
-
 export async function inspectA71Setup(input) {
   const host = validateLocalHost(input || "192.168.10.1");
   const base = `http://${host}`;
   const responses = [];
   let cursor = 0;
-  await Promise.all(Array.from({ length: 3 }, async () => {
-    while (cursor < A71_READ_ONLY_PATHS.length) {
-      const path = A71_READ_ONLY_PATHS[cursor++];
-      responses.push(await inspectHttpPath(base, path));
-    }
-  }));
+  while (cursor < A71_READ_ONLY_PATHS.length) {
+    const path = A71_READ_ONLY_PATHS[cursor++];
+    responses.push(await inspectHttpPath(base, path));
+  }
   responses.sort((a, b) => A71_READ_ONLY_PATHS.indexOf(a.path) - A71_READ_ONLY_PATHS.indexOf(b.path));
   const reachable = responses.some((item) => !item.error);
   const baseline = responses.find((item) => item.path === "/" && !item.error);
   const findings = responses.filter((item) => !item.error && (
     item.status < 400 || !baseline || item.status !== baseline.status || item.fingerprint !== baseline.fingerprint
   ));
-  const webSockets = await Promise.all(["/mca", "/ws", "/websocket"].map((path) => inspectWebSocket(host, path)));
   return {
     reachable,
     checkedAt: new Date().toISOString(),
     pathsChecked: responses.length,
     responses: responses.filter((item) => !item.error).length,
     findings,
-    webSockets: webSockets.filter((item) => item.open),
-    safety: "Read-only HTTP GETs and WebSocket handshakes only; no configuration or registration calls were sent.",
+    safety: "Read-only HTTP GETs only; no configuration or registration calls were sent.",
   };
 }
 

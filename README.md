@@ -39,32 +39,32 @@ See
 [`RESEARCH_STATUS.md`](RESEARCH_STATUS.md) for the verified network evidence,
 deployment context, exact implementation status, known gaps, and next steps.
 
-### Inspect the A71 setup network without changing it
+### Read A71 adapter information without changing it
 
-The Mac dashboard now has **System → Inspect A71 setup mode**. This is a
-bounded, read-only check of the adapter's temporary `daikin-ap` network. It
-sends HTTP `GET` requests only to information/status/setup paths and opens
-WebSocket handshakes without sending frames. It never calls reset, register,
-remove, delete, or setting endpoints.
+The Mac dashboard has **System → Read A71 adapter information**. This is a
+bounded, read-only check of the exact provisioning routes used by ONECTA. The
+routes were verified on the normal home network: leave AP off, confirm RUN is
+continuously lit, and keep the Mac on the same Wi-Fi. The reader never calls
+reset, cloud-connect, Wi-Fi-setting, firmware, or other mutation endpoints.
 
 1. Run the local dashboard with `npm start` and leave it open.
-2. Hold **MODE** on BRP069A71 for about two seconds until AP flashes.
-3. Connect the Mac to `daikin-ap` using the password supplied by ONECTA.
-4. In the local dashboard open **System → Inspect A71 setup mode** and use the
-   default gateway `192.168.10.1`.
-5. Reconnect the Mac to the home Wi-Fi afterward and hold **MODE** again if the
-   adapter does not leave AP mode itself.
+2. Confirm **AP is off** and **RUN is continuously lit**.
+3. Keep the Mac connected to the same home Wi-Fi as the adapter.
+4. In the local dashboard open **System → Read A71 adapter information** and
+   click **Read adapter information**.
 
 The same inspection can be run from Terminal:
 
 ```sh
-npm run inspect:a71 -- 192.168.10.1
+npm run inspect:a71 -- <adapter-private-ip>
 ```
 
-The output contains response structure, hashes, key names and route hints—not
-SSID, MAC address, account identifiers, registration values or response-body
-content. A discovered state-changing ownership endpoint must be reviewed and
-explicitly approved before it is called.
+The output contains response structure, hashes, field names, and a small
+allowlist of non-identifying status/model/firmware values—not SSID, MAC, IP,
+serial number, account identifiers, gateway identifiers, or response bodies.
+The adapter's cloud-connect and Wi-Fi-setting routes are known but are not
+called. Any state-changing experiment must be reviewed and explicitly
+approved first.
 
 ## Your hardware: BRP069A71
 
@@ -113,11 +113,12 @@ The app includes a safe local probe because firmware varies, but a failed probe
 is expected for BRP069A71 and cannot be corrected by application software.
 The probe does not change adapter or heat-pump settings.
 
-The supplied unit was tested on its home LAN: the gateway answers on HTTP port
-80, but the Altherma `/mca`, legacy `/common/*` and `/aircon/*`, and newer
-`/dsiot/multireq` status/control endpoints are absent. The application recognizes
-this response as a reachable cloud gateway and reports it without falsely
-claiming local control.
+The supplied unit was tested on its home LAN. Its read-only ONECTA provisioning
+routes expose adapter, product, firmware, and WLAN metadata, including a
+connected state and the presence of a cloud identity. The Altherma `/mca`,
+legacy `/common/*` and `/aircon/*`, and newer `/dsiot/multireq` heat-pump
+status/control endpoints are absent. The application reports the provisioning
+metadata without falsely claiming local heat-pump control.
 
 Offline local control would require one of:
 

@@ -142,7 +142,24 @@ The HTTP server returns a small plain-text `404 ... not_found` response for:
 - a curated group of read-only paths under `/api`, `/gateway`, `/system`,
   `/device`, `/wifi`, `/network`, `/status`, and `/version`.
 
-No HTTP endpoint providing temperatures, operating state, schedules, or
+Static inspection of a current ONECTA Android bundle identified the A71's
+actual local provisioning API. The following read-only routes were then
+verified against the installed adapter on the normal home LAN while AP was off
+and RUN was continuously lit:
+
+- `GET /config/adapter/info`;
+- `GET /config/adapter/product_info`;
+- `GET /config/firmware/info`;
+- `GET /config/wlan/networks`.
+
+The responses confirm the A71 model, EU/heating product class, firmware
+`4.2.2`, WLAN metadata, `connected` adapter state, and a non-empty cloud
+identity. The application exposes only allowlisted non-identifying fields and
+suppresses IDs, MAC, IP, serial, SSIDs, and response bodies.
+
+The same client bundle identifies state-changing setup routes for WLAN scan,
+WLAN settings, firmware upload, and cloud connection. None was invoked. No
+local route providing heat-pump temperatures, operating state, schedules, or
 control was found.
 
 ### UDP behavior
@@ -163,15 +180,30 @@ sensors, controls, `/dsiot/multireq`, or `/mca`.
 
 ### Current conclusion
 
-The installed BRP069A71 is reachable locally and supports model discovery, but
-the investigation has not found a local heat-pump status/control API. Its
-behavior differs from the BRP069A61/A62 adapters that expose the known `/mca`
-WebSocket protocol.
+The installed BRP069A71 is reachable locally and exposes an unauthenticated
+provisioning-information API, but the investigation has not found a local
+heat-pump status/control API. Its behavior differs from the BRP069A61/A62
+adapters that expose the known `/mca` WebSocket protocol.
+
+The ONECTA onboarding implementation reads the adapter's `gatewayDeviceId` and
+compares it with the gateway IDs returned for the currently authorized cloud
+account. A non-empty local identity that is absent from that account is what
+drives `ALREADY_REGISTERED_TO_OTHER`. The installed adapter is `connected` and
+has such an identity. No local ownership-removal endpoint appears in the A71
+client module, so the evidence still points to a server-side stale ownership
+record rather than a missing local reset button.
+
+The client also contains the supported server-side removal call,
+`DELETE /v1/gateway-devices/{id}`. ONECTA invokes it only for a gateway already
+returned to the signed-in account. Because the current account's gateway list
+is empty, this supported removal action is not available for the stale record.
+Do not copy the locally reported identifier into a speculative delete request;
+authorization and ownership must be resolved server-side first.
 
 This is a current evidence-based result, not proof that no undocumented local
-control path exists. The remaining likely sources of information are the
-official mobile client's provisioning flow, the adapter's cloud traffic, and
-firmware analysis.
+control path exists. The official mobile client's provisioning flow has now
+been inspected; remaining research sources are passive cloud-traffic metadata
+and deeper firmware analysis.
 
 ## Application implementation status
 
@@ -181,7 +213,7 @@ firmware analysis.
 | BRP069A61/A62 local connector | Implemented | `/mca` WebSocket reads, actions, and weekly schedules |
 | BRP069A71 identification | Implemented | Safe LAN probe recognizes its cloud-gateway HTTP behavior |
 | BRP069A71 UDP discovery | Research tool implemented | Confirms adapter model; not yet a control channel |
-| BRP069A71 setup-mode inspector | Implemented, awaiting AP-mode run | Local dashboard and `npm run inspect:a71` perform only bounded GETs and empty WebSocket handshakes against `daikin-ap`; output is structural/redacted |
+| BRP069A71 information reader | Implemented and verified | Exact read-only ONECTA provisioning routes work on the home LAN with AP off/RUN solid; output is allowlisted and redacted |
 | BRP069A71 local state/control | Not discovered | No usable HTTP, WebSocket, or tested UDP control endpoint found |
 | ONECTA OAuth connector | Implemented | Token refresh, cached reads, rate-limit tracking, and writes to advertised settable characteristics |
 | ONECTA authentication | Connected | OAuth completed through the registered HTTPS callback; API requests succeed |
@@ -212,8 +244,8 @@ Relevant files:
   energy rules, history journal, and weather normalisation;
 - `scripts/efficiency-audit.mjs` — day-one read-only energy review;
 - `scripts/research-a71.mjs` — read-only HTTP/UDP A71 research probe;
-- `scripts/inspect-a71-setup.mjs` — redacted, read-only inspection of the
-  temporary `daikin-ap` setup interface;
+- `scripts/inspect-a71-setup.mjs` — redacted, read-only inspection of the A71
+  provisioning-information interface;
 - `test/local-altherma.test.js` and `test/onecta.test.js` — connector tests.
 
 ## How to reproduce safely
@@ -266,12 +298,11 @@ so redact those fields before sharing it.
 
 ### Immediate operational work
 
-1. Run **System → Inspect A71 setup mode** from the Mac while it is connected
-   to `daikin-ap`. Review any distinct route or open WebSocket before sending
-   any state-changing request.
-2. In parallel, continue the ownership-release escalation with Daikin; the
-   official A71 guide documents cloud-only operation and a POWER reset, but no
-   local ownership-release procedure.
+1. Continue the ownership-release escalation with Daikin; the verified local
+   API exposes the stale cloud identity but no removal operation.
+2. If a state-changing A71 experiment is proposed, document its exact route,
+   method, expected response, rollback, and risk, then obtain explicit owner
+   approval before sending it.
 3. After release, add the gateway to the same ONECTA account that authorized
    `pdc_control`.
 4. Refresh the dashboard and verify that `/v1/gateway-devices` changes from an
@@ -290,16 +321,14 @@ so redact those fields before sharing it.
 
 ### Optional BRP069A71 local-protocol research
 
-1. If the read-only setup-mode inspection identifies a protocol, capture the
-   official app's provisioning exchange and implement only the minimum
-   authenticated ownership/status operation that can be validated safely.
+1. The local provisioning API is now mapped. Continue only with passive
+   analysis or a separately reviewed, explicitly approved mutation experiment.
 2. Capture passive network metadata for the adapter at the router: DNS names,
    destination IPs, ports, TLS Server Name Indication, connection timing, and
    behavior during a normal ONECTA action. Avoid publishing credentials or
    tokens.
-3. Inspect the official Android ONECTA application's onboarding and local
-   provisioning code for BRP069A71-specific paths, request formats, encryption,
-   or certificate pinning.
+3. Continue inspecting the ONECTA onboarding logic for response schemas and
+   cloud-registration behavior; the primary A71 routes and methods are mapped.
 4. Perform a carefully bounded full TCP/UDP service survey if needed, without
    brute-forcing credentials or sending state-changing payloads.
 5. Locate legitimate public BRP069A71 firmware/update artifacts and inspect

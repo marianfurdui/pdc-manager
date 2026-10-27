@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A self-hosted dashboard (Node server + vanilla-JS PWA) for a Daikin Altherma 3 H HT heat pump: indoor unit `ETVX16S23D9W`, outdoor unit `EPRA14DW1`, Wi-Fi adapter `BRP069A71`. It has **zero npm dependencies**: only Node built-ins (`node:http`, `node:crypto`, global `fetch`/`WebSocket`, `node:test`). Do not add packages without a strong reason. Node ≥ 22 is required (24 recommended) because the local connector uses the global `WebSocket`.
 
-The BRP069A71 appears to be cloud-only. It answers UDP discovery on port 30050 with its model, but no local status or control API has been found. Real control therefore goes through the official **ONECTA cloud API**. The local `/mca` connector targets BRP069A61/A62 adapters and does not work against this unit.
+The BRP069A71 exposes UDP discovery and a small local provisioning-information API, but no local heat-pump status or control API has been found. Real control therefore goes through the official **ONECTA cloud API**. The local `/mca` connector targets BRP069A61/A62 adapters and does not work against this unit.
 
 Earlier sessions were done with Codex, and the project docs are shared between agents. Before changing anything, read:
 - `RESEARCH_STATUS.md`: the authoritative record of evidence, live deployment state, blockers and next steps. Update it when the investigation or deployment changes.
@@ -33,7 +33,7 @@ node --test test/onecta.test.js                         # single file
 node --test --test-name-pattern="round-trips" test/     # single test by name
 npm run check                  # syntax check all server and browser entry points
 node scripts/research-a71.mjs <private-ip>              # read-only BRP069A71 HTTP/UDP probe (redact IP/MAC in output)
-npm run inspect:a71 -- 192.168.10.1                     # bounded/redacted inspection while Mac is on daikin-ap
+npm run inspect:a71 -- <adapter-private-ip>             # redacted A71 provisioning metadata over the home LAN
 docker compose up -d --build   # container; data is in the altherma-data volume
 ```
 
@@ -54,7 +54,7 @@ Environment variables: `HOST` (default `127.0.0.1`), `PORT` (8787), `DATA_DIR` (
 - **`src/lib/redis-store.js`**: hosted `RedisSecureStore` encrypts the entire settings document with AES-256-GCM before writing it to an Upstash-compatible Redis REST endpoint. It requires a stable `APP_SECRET`.
 - **`src/lib/errors.js`**: throw `AppError(message, status, code, details)` for anything the user should see. Any other error becomes a generic 500 via `publicError`.
 - **`src/lib/http.js`**: `readJson` enforces the content type and a size cap, `safeSegment` encodes untrusted URL path segments, and `fetchWithTimeout` handles upstream calls.
-- **A71 setup inspector**: `inspectA71Setup` in `src/connectors/local-altherma.js`, `/api/local/a71-inspect`, and `scripts/inspect-a71-setup.mjs` perform bounded read-only GETs plus empty WebSocket handshakes against the temporary `daikin-ap` interface. Results contain structural metadata only. Never add mutation-like paths (`set`, `reset`, `register`, `remove`, `delete`) without a separate reviewed implementation and explicit owner approval.
+- **A71 information reader**: `inspectA71Setup` in `src/connectors/local-altherma.js`, `/api/local/a71-inspect`, and `scripts/inspect-a71-setup.mjs` call only the exact read-only provisioning routes recovered from ONECTA. They work on the home LAN while AP is off and RUN is solid. Results expose structural metadata and a small allowlist of non-identifying values; IDs, MAC, IP, serial, SSIDs, and body content are suppressed. Never call `PUT config/wlan/settings`, `POST config/wlan/scan`, `POST config/cloud/connect`, reboot, firmware, or another mutating route without a separate reviewed implementation and explicit owner approval.
 - **`public/app.js`**: a no-build SPA that renders HTML strings. Interpolated values must go through `escapeHtml`. The CSP forbids inline scripts and styles.
 
 ## Constraints to preserve
@@ -76,6 +76,6 @@ Environment variables: `HOST` (default `127.0.0.1`), `PORT` (8787), `DATA_DIR` (
 3. Sign in to the hosted UI with the application password, then verify the migrated ONECTA connection and device refresh.
 4. Make **Disconnect cloud** revoke tokens at Daikin. `disconnect()` currently only deletes the locally stored tokens; treat that as a documented gap until it is fixed and tested.
 5. Continue optional A71 protocol research only as scoped in `RESEARCH_STATUS.md`.
-6. Run the read-only setup-mode inspection while the Mac is connected to
-   `daikin-ap`, then review any discovered protocol before implementing a
-   state-changing ownership operation.
+6. Continue optional A71 analysis from the verified provisioning API, keeping
+   all further requests read-only unless a specific state-changing experiment
+   is separately reviewed and explicitly approved.

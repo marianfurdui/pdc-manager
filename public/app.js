@@ -902,13 +902,13 @@ function system(device) {
       ${gateway.status === "reachable" ? `<p class="muted">${escapeHtml(gateway.model || "Daikin Wi-Fi adapter")} answered ${gateway.checkedAt ? escapeHtml(relativeTime(gateway.checkedAt)) : "just now"}.</p>` : gateway.status === "unreachable" ? `<p class="muted">No answer. Check the address and that this Mac is on your home Wi-Fi.</p>` : ""}
     </article>` : `<article class="panel"><header class="panel-head"><div><h2>Wi-Fi adapter</h2><p>This hosted dashboard talks only to Daikin's cloud and never reaches into your home network. Adapter checks are available from the dashboard on your Mac.</p></div><span class="status-dot local-only">Home network only</span></header></article>`;
   const setupInspection = localReachability ? `<details class="panel credentials">
-      <summary><div><h2>Inspect A71 setup mode</h2><p>Looks for a local setup interface without changing registration, Wi-Fi or heat-pump settings.</p></div><span class="chip">Read only</span></summary>
+      <summary><div><h2>Read A71 adapter information</h2><p>Checks the exact local information routes used by ONECTA without changing registration, Wi-Fi or heat-pump settings.</p></div><span class="chip">Read only</span></summary>
       <div class="settings-form">
-        <ol class="compact-steps"><li>Hold MODE on the BRP069A71 for about 2 seconds until AP flashes.</li><li>Connect this Mac to the <strong>daikin-ap</strong> Wi-Fi shown by the adapter.</li><li>Keep this local dashboard open and run the inspection.</li></ol>
-        <form id="a71-inspect" class="inline-form"><label><span>Setup gateway address</span><input name="host" required inputmode="decimal" value="192.168.10.1" autocomplete="off"></label><button class="primary">Inspect setup mode</button></form>
+        <ol class="compact-steps"><li>Leave AP off and confirm RUN is continuously lit.</li><li>Keep this Mac connected to the same home Wi-Fi.</li><li>Read the adapter information below.</li></ol>
+        <form id="a71-inspect" class="inline-form"><label><span>Adapter address</span><input name="host" required inputmode="decimal" value="${escapeHtml(settings.local?.host || "192.168.10.1")}" autocomplete="off"></label><button class="primary">Read adapter information</button></form>
         ${a71InspectionResult(state.a71Inspection)}
       </div>
-    </details>` : `<article class="panel"><header class="panel-head"><div><h2>A71 setup-mode inspection</h2><p>For safety, this read-only check runs only from the local Mac dashboard while the Mac is connected to daikin-ap.</p></div><span class="status-dot local-only">Mac only</span></header></article>`;
+    </details>` : `<article class="panel"><header class="panel-head"><div><h2>A71 adapter information</h2><p>For safety, this read-only home-network check runs only from the local Mac dashboard.</p></div><span class="status-dot local-only">Mac only</span></header></article>`;
   return `<section class="page">${pageHead("System", "Daikin account, API usage and the Wi-Fi adapter.", device)}${notices()}
     <div class="system-grid">
       <article class="panel">
@@ -934,12 +934,26 @@ function system(device) {
 
 function a71InspectionResult(result) {
   if (!result) return "";
-  if (!result.reachable) return `<div class="notice error"><strong>No setup interface answered.</strong> Confirm that AP is flashing and this Mac is connected to daikin-ap.</div>`;
+  if (!result.reachable) return `<div class="notice error"><strong>The adapter did not answer.</strong> Confirm that RUN is continuously lit and this Mac is connected to the same home Wi-Fi.</div>`;
   const findings = result.findings || [];
-  const sockets = result.webSockets || [];
-  return `<div class="inspection-result"><p><strong>Adapter answered.</strong> ${escapeHtml(result.responses)} of ${escapeHtml(result.pathsChecked)} safe HTTP checks responded; ${escapeHtml(findings.length)} had a distinct result.</p>
-    ${findings.length ? `<dl class="facts">${findings.map((item) => `<div><dt>${escapeHtml(item.path)}</dt><dd>${escapeHtml(item.status)}${item.markers?.length ? ` · ${escapeHtml(item.markers.join(", "))}` : ""}${item.keys?.length ? ` · keys: ${escapeHtml(item.keys.join(", "))}` : ""}</dd></div>`).join("")}</dl>` : `<p class="muted">Every responding path returned the same embedded-server response. No readable setup or ownership interface was exposed.</p>`}
-    ${sockets.length ? `<p class="muted">Open WebSocket: ${escapeHtml(sockets.map((item) => item.path).join(", "))}</p>` : `<p class="muted">No tested WebSocket endpoint opened.</p>`}
+  const adapter = findings.find((item) => item.path === "/config/adapter/info");
+  const cloudIdentityPresent = adapter?.details?.cloudIdentityPresent === true;
+  const labels = {
+    status: "Cloud connection",
+    cloudIdentityPresent: "Cloud identity stored",
+    udpDiscovery: "LAN discovery",
+    wifiAuthenticationType: "Wi-Fi security",
+    model: "Model",
+    region: "Region",
+    deviceType: "Product type",
+    version: "Firmware",
+  };
+  return `<div class="inspection-result"><p><strong>Adapter answered.</strong> ${escapeHtml(result.responses)} of ${escapeHtml(result.pathsChecked)} read-only routes responded; ${escapeHtml(findings.length)} returned useful or distinct results.</p>
+    ${cloudIdentityPresent ? `<div class="notice"><strong>Cloud identity is still stored.</strong> The adapter is connected to Daikin Cloud and still identifies an existing gateway registration. This matches the stale-account ownership error.</div>` : ""}
+    ${findings.length ? `<dl class="facts">${findings.map((item) => {
+      const details = Object.entries(item.details || {}).map(([key, value]) => `${labels[key] || key}: ${typeof value === "boolean" ? (value ? "yes" : "no") : value}`).join(" · ");
+      return `<div><dt>${escapeHtml(item.path)}</dt><dd>${escapeHtml(item.status)}${details ? ` · ${escapeHtml(details)}` : ""}${item.keys?.length ? ` · fields: ${escapeHtml(item.keys.join(", "))}` : ""}</dd></div>`;
+    }).join("")}</dl>` : `<p class="muted">Every responding path returned the same embedded-server response. No readable setup or ownership interface was exposed.</p>`}
     <p class="muted">${escapeHtml(result.safety)}</p></div>`;
 }
 

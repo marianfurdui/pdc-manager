@@ -53,3 +53,26 @@ test("A71 setup responses expose structure without values", () => {
   assert.equal(JSON.stringify(summary).includes("PrivateNetwork"), false);
   assert.equal(JSON.stringify(summary).includes("secret-user"), false);
 });
+
+test("A71 setup summaries ignore a generic 404's echoed request path", () => {
+  const root = summarizeA71Response("/", 404, "text/plain", "File / not_found");
+  const wifi = summarizeA71Response("/config/wlan/networks", 404, "text/plain", "File /config/wlan/networks not_found");
+  assert.equal(wifi.fingerprint, root.fingerprint);
+  assert.deepEqual(wifi.markers, []);
+});
+
+test("A71 setup summaries expose only allowlisted non-identifying values", () => {
+  const summary = summarizeA71Response("/config/adapter/info", 200, "application/json", JSON.stringify({
+    udid: "private-id",
+    gatewayDeviceId: "private-gateway-id",
+    macAddress: "001122334455",
+    ipAddress: "192.168.1.42",
+    status: "Connected",
+    udpDiscovery: true,
+  }));
+  assert.deepEqual(summary.details, { status: "Connected", udpDiscovery: true, cloudIdentityPresent: true });
+  const serialized = JSON.stringify(summary);
+  assert.equal(serialized.includes("private-id"), false);
+  assert.equal(serialized.includes("001122334455"), false);
+  assert.equal(serialized.includes("192.168.1.42"), false);
+});
