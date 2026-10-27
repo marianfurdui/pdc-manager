@@ -201,7 +201,8 @@ Relevant files:
 - `src/connectors/local-altherma.js` — local A61/A62 connector and A71-compatible
   gateway classification;
 - `src/connectors/onecta.js` — official ONECTA OAuth/API connector;
-- `src/server.js` — HTTP API, connector orchestration, settings, and validation;
+- `src/app-handler.js` — HTTP API, connector orchestration, settings, and validation;
+- `src/local-server.js` — Mac-only long-running server wrapper;
 - `public/app.js` — device, control, schedule, and system UI;
 - `scripts/research-a71.mjs` — read-only HTTP/UDP A71 research probe;
 - `test/local-altherma.test.js` and `test/onecta.test.js` — connector tests.

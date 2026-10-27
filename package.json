@@ -5,10 +5,10 @@
   "type": "module",
   "description": "Capability-driven Daikin Altherma dashboard with ONECTA cloud and optional local access",
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "DEMO_MODE=true node --watch src/server.js",
+    "start": "node src/local-server.js",
+    "dev": "DEMO_MODE=true node --watch src/local-server.js",
     "test": "node --test",
-    "check": "node --check src/server.js && node --check src/app-handler.js && node --check src/lib/redis-store.js && node --check api/index.js && node --check public/app.js"
+    "check": "node --check src/local-server.js && node --check src/app-handler.js && node --check src/lib/redis-store.js && node --check api/index.js && node --check public/app.js"
   },
   "engines": {
     "node": "22.x"

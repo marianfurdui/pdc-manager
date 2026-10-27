@@ -7,4 +7,4 @@ ENV HOST=0.0.0.0 PORT=8787 DATA_DIR=/data
 VOLUME ["/data"]
 EXPOSE 8787
 USER node
-CMD ["node", "src/server.js"]
+CMD ["node", "src/local-server.js"]

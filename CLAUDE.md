@@ -25,12 +25,12 @@ Earlier sessions were done with Codex, and the project docs are shared between a
 ## Commands
 
 ```sh
-npm start                      # node src/server.js on http://127.0.0.1:8787
+npm start                      # node src/local-server.js on http://127.0.0.1:8787
 npm run dev                    # DEMO_MODE=true with --watch (fake device, writes are no-ops)
 npm test                       # node --test (runs test/*.test.js)
 node --test test/onecta.test.js                         # single file
 node --test --test-name-pattern="round-trips" test/     # single test by name
-npm run check                  # syntax check server.js and public/app.js
+npm run check                  # syntax check all server and browser entry points
 node scripts/research-a71.mjs <private-ip>              # read-only BRP069A71 HTTP/UDP probe (redact IP/MAC in output)
 docker compose up -d --build   # container; data is in the altherma-data volume
 ```
@@ -42,7 +42,7 @@ Environment variables: `HOST` (default `127.0.0.1`), `PORT` (8787), `DATA_DIR` (
 ## Architecture
 
 - **`src/app-handler.js`**: shared authenticated request handler for OAuth, API routes and static files. Each request body carries `source: "local" | "cloud"`, and the server dispatches to the matching connector. `/api/devices` merges available snapshots and returns per-connector errors rather than failing outright.
-- **`src/server.js`**: thin long-running Mac/Node wrapper using `SecureStore`; local LAN features are enabled.
+- **`src/local-server.js`**: thin long-running Mac/Node wrapper using `SecureStore`; local LAN features are enabled. Its name intentionally avoids Vercel's zero-config `src/server.js` detection.
 - **`api/index.js`**: Vercel function wrapper using `RedisSecureStore`; local LAN features are disabled and route rewrites restore the public request URL.
 - **Connectors** share a loose shape (`snapshot`, `write`, `writeSchedule`) but return different device shapes:
   - `src/connectors/local-altherma.js`: oneM2M-style JSON over `ws://<host>/mca`. Reads use the `READERS` item map. Writes are only allowed through the `WRITERS` whitelist, which validates ranges. Schedules use a custom `$NULL|1|HHMM,value;...` string encoding (`marshallSchedule`/`unmarshallSchedule`, max 6 changes per day; tank values are semantic modes). `probe()` falls back to `classifyCloudGatewayHttp` to recognize an A71-style gateway and stores `localControl: false`, which makes the server skip local snapshots.
