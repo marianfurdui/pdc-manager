@@ -62,7 +62,7 @@ test("weather is fetched with rounded coordinates and cached for the day", async
   };
   const journal = emptyJournal();
   const now = new Date("2026-10-27T12:00:00Z");
-  assert.equal(await ensureWeather(journal, { latitude: 46.7712, longitude: 23.6236, timeZone: "UTC" }, { now, fetchImpl }), true);
+  assert.equal(await ensureWeather(journal, { latitude: 46.77123457, longitude: 23.62361234, timeZone: "UTC" }, { now, fetchImpl }), true);
   assert.equal(urls.length, 2);
   for (const url of urls) {
     assert.equal(url.searchParams.get("latitude"), "46.8");

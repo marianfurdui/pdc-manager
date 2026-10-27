@@ -250,7 +250,7 @@ ONECTA:
 
 Energy review (read-only):
 
-- **System → Your home** stores the home profile (rounded location, floor
+- **System → Your home** stores the home profile (location, floor
   area, occupants, preferred temperatures, emitters, tariff, solar,
   insulation) in the encrypted settings;
 - **Home → Ways to use less energy** lists findings from
@@ -261,7 +261,7 @@ Energy review (read-only):
   in a separate encrypted journal: `data/journal.enc.json` locally, the
   `pdc-control:journal` Redis key when hosted;
 - past daily outdoor temperatures come from Open-Meteo using only the
-  location rounded to 0.1°;
+  location rounded to 0.1° (the profile keeps up to 8 decimals);
 - `node scripts/efficiency-audit.mjs` runs the day-one review (one ONECTA
   request, redacted payload saved under `data/audits/`).
 

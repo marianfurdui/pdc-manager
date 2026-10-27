@@ -15,8 +15,8 @@ async function serve(options) {
 }
 
 test("house profiles keep known fields and round coordinates", () => {
-  assert.deepEqual(sanitizeHouse({ latitude: "46.7712", longitude: 23.6236, area: "140", emitters: "underfloor", tariff: "flat", timeZone: "Europe/Bucharest", extra: "dropped", occupants: "" }), {
-    latitude: 46.8, longitude: 23.6, area: 140, emitters: "underfloor", tariff: "flat", timeZone: "Europe/Bucharest",
+  assert.deepEqual(sanitizeHouse({ latitude: "46.771234567", longitude: 23.6236, area: "140", emitters: "underfloor", tariff: "flat", timeZone: "Europe/Bucharest", extra: "dropped", occupants: "" }), {
+    latitude: 46.77123457, longitude: 23.6236, area: 140, emitters: "underfloor", tariff: "flat", timeZone: "Europe/Bucharest",
   });
   assert.throws(() => sanitizeHouse({ dayTemp: 40 }), /dayTemp/);
   assert.throws(() => sanitizeHouse({ emitters: "stove" }), /emitters/);

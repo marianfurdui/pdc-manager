@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { LocalAlthermaConnector } from "./connectors/local-altherma.js";
 import { normalizeCloudDevices, OnectaConnector } from "./connectors/onecta.js";
 import { demoCloudDevice, demoJournal } from "./demo.js";
-import { ensureWeather, roundCoordinate } from "./lib/degree-days.js";
+import { ensureWeather } from "./lib/degree-days.js";
 import { evaluate, INSTALLER_CHECKLIST } from "./lib/efficiency.js";
 import { publicError, AppError } from "./lib/errors.js";
 import { readJson, sendJson } from "./lib/http.js";
@@ -43,7 +43,9 @@ export function sanitizeHouse(input = {}) {
     if (input[key] === "" || input[key] === null || input[key] === undefined) continue;
     const value = Number(input[key]);
     if (!Number.isFinite(value) || value < min || value > max) throw new AppError(`${key} must be between ${min} and ${max}`, 400, "INVALID_HOUSE");
-    house[key] = key === "latitude" || key === "longitude" ? roundCoordinate(value) : Math.round(value * 10) / 10;
+    // Coordinates keep up to 8 decimals; ensureWeather rounds them to 0.1°
+    // before anything is sent to Open-Meteo.
+    house[key] = key === "latitude" || key === "longitude" ? Math.round(value * 1e8) / 1e8 : Math.round(value * 10) / 10;
   }
   for (const [key, choices] of Object.entries(HOUSE_CHOICES)) {
     if (!input[key]) continue;

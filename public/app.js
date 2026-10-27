@@ -940,11 +940,11 @@ function houseForm(house) {
   const field = (name, label, attributes) => `<label><span>${label}</span><input name="${name}" type="number" value="${escapeHtml(house[name] ?? "")}" ${attributes}></label>`;
   const select = (name, label) => `<label><span>${label}</span><select name="${name}">${HOUSE_OPTIONS[name].map(([value, text]) => `<option value="${value}" ${(house[name] || HOUSE_DEFAULTS[name]) === value ? "selected" : ""}>${text}</option>`).join("")}</select></label>`;
   const located = Number.isFinite(house.latitude) && Number.isFinite(house.longitude);
-  return `<details class="panel credentials" ${Object.keys(house).length ? "" : "open"}><summary><div><h2>Your home</h2><p>Used to tailor energy suggestions. Only the rounded location (about 10 km) leaves this app, to fetch past outdoor temperatures.</p></div><span class="chip">${Object.keys(house).length ? "Edit" : "Add details"}</span></summary>
+  return `<details class="panel credentials" ${Object.keys(house).length ? "" : "open"}><summary><div><h2>Your home</h2><p>Used to tailor energy suggestions. Only the location rounded to about 10 km leaves this app, to fetch past outdoor temperatures.</p></div><span class="chip">${Object.keys(house).length ? "Edit" : "Add details"}</span></summary>
     <form id="house-settings" class="settings-form house-form">
       <fieldset class="location"><legend>Location</legend>
         <div class="location-row">${field("latitude", "Latitude", 'step="any" min="-90" max="90" inputmode="decimal"')}${field("longitude", "Longitude", 'step="any" min="-180" max="180" inputmode="decimal"')}<button type="button" class="secondary" data-command="house-locate">Use this device's location</button></div>
-        <p class="muted">${located ? `Saved as ${escapeHtml(house.latitude)}, ${escapeHtml(house.longitude)}${house.timeZone ? `, ${escapeHtml(house.timeZone)}` : ""}.` : "Rounded to one decimal before saving."}</p>
+        <p class="muted">${located ? `Saved as ${escapeHtml(house.latitude)}, ${escapeHtml(house.longitude)}${house.timeZone ? `, ${escapeHtml(house.timeZone)}` : ""}.` : "Up to 8 decimals are kept. Only a version rounded to one decimal is sent to Open-Meteo."}</p>
       </fieldset>
       <div class="form-grid">
         ${field("area", "Heated floor area (m²)", 'min="10" max="2000" step="1"')}
@@ -1191,9 +1191,8 @@ app.addEventListener("click", async (event) => {
     if (!navigator.geolocation) return toast("This browser can't share its location. Enter it by hand.", true);
     navigator.geolocation.getCurrentPosition((position) => {
       const form = button.closest("form");
-      // Rounded here too, so precise coordinates never leave the browser.
-      form.elements.latitude.value = (Math.round(position.coords.latitude * 10) / 10).toFixed(1);
-      form.elements.longitude.value = (Math.round(position.coords.longitude * 10) / 10).toFixed(1);
+      form.elements.latitude.value = position.coords.latitude.toFixed(8);
+      form.elements.longitude.value = position.coords.longitude.toFixed(8);
     }, () => toast("Location wasn't shared. Enter it by hand.", true), { maximumAge: 3_600_000, timeout: 15_000 });
     return;
   }
