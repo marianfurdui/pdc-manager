@@ -17,7 +17,7 @@ Earlier sessions were done with Codex, and the project docs are shared between a
 
 - The dashboard runs on loopback at `http://127.0.0.1:8787`.
 - The production hostname is `https://hp.operagrid.net`. The user changed its Cloudflare DNS record for Vercel and registered exactly `https://hp.operagrid.net/oauth/callback` in the Daikin developer app.
-- `api/index.js` and `vercel.json` adapt the same request handler to Vercel. `RedisSecureStore` persists the encrypted settings document through an Upstash-compatible REST API. Production verification is still required before calling this deployment live.
+- `api/index.js` and `vercel.json` adapt the same request handler to Vercel. The deployment is live: the Cloudflare/Vercel custom domain, TLS, Basic authentication, public OAuth callback, and Upstash-backed encrypted store have been verified. The existing local ONECTA credentials/session still require explicit approval before they are copied to the hosted store, or the user can reconnect from the hosted UI.
 - ONECTA OAuth and consent are complete: encrypted tokens are stored, `connected` is true, and authenticated API calls succeed.
 - **`/v1/gateway-devices` returns `[]` with no error.** This is a device-ownership problem: onboarding reports `ALREADY_REGISTERED_TO_OTHER`, and Daikin support has been asked to release the gateway. Do not misdiagnose it as an OAuth, HTTPS or transport failure. Once the gateway is onboarded to the authorized account, call `/api/devices?refresh=true` and inspect a redacted payload before adding any model-specific assumptions.
 - The Mac runtime remains local and supports LAN probing. The Vercel runtime is ONECTA-only and deliberately cannot probe or control LAN adapters.
@@ -68,7 +68,7 @@ Environment variables: `HOST` (default `127.0.0.1`), `PORT` (8787), `DATA_DIR` (
 
 1. Verify device discovery after Daikin releases the gateway and it is onboarded.
 2. Map the real device's management points, actions, schedules, enum values, ranges and units from a redacted payload.
-3. Install the Node server and the tunnel as restricted startup services, and rotate `APP_PASSWORD` while doing so.
+3. With explicit approval, migrate the existing local ONECTA credentials and session to the encrypted hosted store, or reconnect from the hosted UI; then verify hosted ONECTA status.
 4. Make **Disconnect cloud** revoke tokens at Daikin. `disconnect()` currently only deletes the locally stored tokens; treat that as a documented gap until it is fixed and tested.
 5. Continue optional A71 protocol research only as scoped in `RESEARCH_STATUS.md`.
 
@@ -87,8 +87,9 @@ Read these files before changing the project:
 - Hardware: Daikin Altherma 3 H HT with indoor `ETVX16S23D9W`, outdoor
   `EPRA14DW1`, and Wi-Fi adapter `BRP069A71`.
 - The local dashboard runs at `http://127.0.0.1:8787`.
-- The production hostname is `https://hp.operagrid.net`; Vercel deployment is
-  being completed and must be verified before being described as live.
+- The production dashboard is live at `https://hp.operagrid.net`; its
+  Cloudflare/Vercel custom domain, TLS, Basic authentication, and public OAuth
+  callback route are verified.
 - The Daikin OIDC callback is registered as
   `https://hp.operagrid.net/oauth/callback`.
 - ONECTA OAuth is connected, encrypted tokens are stored, and authenticated
@@ -133,8 +134,9 @@ redacted payload before adding model-specific assumptions.
 1. Verify device discovery after account release/onboarding.
 2. Inspect and safely map the real device's management points, actions,
    schedules, enum values, ranges, and units.
-3. Complete and verify the Vercel deployment, Redis persistence, Basic auth,
-   custom domain, and OAuth migration.
+3. With explicit approval, migrate the existing local ONECTA credentials and
+   session to the encrypted hosted store, or reconnect from the hosted UI;
+   then verify hosted ONECTA status.
 4. Implement and test Daikin access/refresh-token revocation for
    **Disconnect cloud**. It currently removes only locally stored tokens.
 5. Continue optional A71 protocol research only as documented in

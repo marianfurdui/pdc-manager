@@ -21,8 +21,8 @@ The intended end state is:
 As of 2026-10-27:
 
 - the local dashboard is running on loopback at `http://127.0.0.1:8787`;
-- the production hostname is `https://hp.operagrid.net`; the user changed its
-  Cloudflare DNS record for Vercel;
+- the production dashboard is live at `https://hp.operagrid.net`; Cloudflare
+  points the verified custom domain to Vercel;
 - the public dashboard requires HTTP Basic authentication;
 - the Daikin developer application has the exact registered redirect URI
   `https://hp.operagrid.net/oauth/callback`;
@@ -34,10 +34,12 @@ As of 2026-10-27:
 - the remaining control blocker is the BRP069A71 cloud ownership/onboarding
   state, not the dashboard, HTTPS tunnel, OAuth client, or API transport.
 
-A Vercel-compatible request handler and encrypted Redis store are implemented.
-Production storage, environment variables, custom-domain routing, and the
-OAuth callback still need end-to-end verification before the new deployment
-is described as live. The Mac runtime remains available for LAN-only checks.
+The Vercel function, production environment, custom-domain routing, TLS, Basic
+authentication, public OAuth callback, and encrypted Redis integration are
+deployed and verified. The existing local ONECTA credentials/session have not
+yet been exported to the hosted store; this requires explicit user approval,
+or a fresh ONECTA connection can be made from the hosted UI. The Mac runtime
+remains available for LAN-only checks.
 
 ## Identified installation
 
@@ -183,8 +185,8 @@ firmware analysis.
 | ONECTA OAuth connector | Implemented | Token refresh, cached reads, rate-limit tracking, and writes to advertised settable characteristics |
 | ONECTA authentication | Connected | OAuth completed through the registered HTTPS callback; API requests succeed |
 | ONECTA live heat-pump access | Blocked externally | Authorized account returns zero devices until the gateway is released from the previous account and onboarded |
-| Secure internet endpoint | Deployment in progress | `hp.operagrid.net` is reserved for Vercel; end-to-end verification is pending |
-| Always-on hosting | Implemented in code | Vercel function, encrypted Redis store, and externalized configuration are ready for production setup |
+| Secure internet endpoint | Live | `hp.operagrid.net` resolves to Vercel; TLS and application Basic authentication are verified |
+| Always-on hosting | Live | Vercel serves the Node function and PWA; Upstash provides durable encrypted application storage |
 | Capability discovery | Implemented | UI exposes only capabilities reported by the selected connector/device |
 | Schedule handling | Implemented where advertised | Local A61/A62 schedules; ONECTA activation/selection and visual editing for recognized weekly programmes when the API advertises writes |
 | Secure settings storage | Implemented | AES-256-GCM encrypted settings/tokens and a protected generated master key |
@@ -265,8 +267,9 @@ so redact those fields before sharing it.
    model-specific UI assumptions.
 4. Verify every reported management point, writable characteristic, schedule,
    range, enum, and unit before performing the first control action.
-5. Complete and verify the Vercel environment, encrypted Redis persistence,
-   Basic authentication, and custom-domain routing.
+5. With explicit approval, migrate the existing local ONECTA credentials and
+   session to the encrypted hosted store, or reconnect from the hosted UI;
+   verify the hosted ONECTA status afterward.
 6. Add server-side ONECTA access/refresh-token revocation to **Disconnect
    cloud**.
 

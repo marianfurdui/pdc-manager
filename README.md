@@ -15,12 +15,12 @@ It provides:
 
 ## Current installation status
 
-As of 2026-10-27, the application stack is functional and its always-on
-deployment is being moved to Vercel:
+As of 2026-10-27, the application stack is functional and its always-on Vercel
+deployment is live:
 
 - local dashboard: `http://127.0.0.1:8787`;
-- production hostname: `https://hp.operagrid.net` (Cloudflare DNS and Daikin
-  callback already updated; final Vercel verification is pending);
+- production dashboard: `https://hp.operagrid.net` (Cloudflare DNS, Vercel
+  custom domain, TLS, Basic authentication, and callback routing verified);
 - remote dashboard authentication: enabled;
 - ONECTA OAuth: connected and tokens stored encrypted;
 - ONECTA API transport: working;
@@ -197,10 +197,10 @@ The callback registered at Daikin is then
 
 This installation uses `https://hp.operagrid.net`; the exact registered
 callback is `https://hp.operagrid.net/oauth/callback`. ONECTA OAuth previously
-succeeded, but its encrypted credentials must be migrated to the hosted store
-or the account must be reconnected after deployment. The authorized account
-will continue to return no gateway devices while BRP069A71 remains assigned to
-the previous account.
+succeeded in the Mac runtime. Its encrypted credentials and session still need
+to be copied to the hosted store with explicit approval, or the account can be
+reconnected from the hosted UI. The authorized account will continue to return
+no gateway devices while BRP069A71 remains assigned to the previous account.
 
 The repository includes a Vercel entry point and an AES-256-GCM encrypted
 Redis store for settings, OAuth PKCE state, tokens, and the short-lived device
@@ -255,8 +255,8 @@ Actual availability is determined by the unit firmware, hydraulic/control config
 - The server refuses `HOST=0.0.0.0` without `APP_PASSWORD`.
 - Local probes accept only RFC1918/link-local IPv4 addresses or `.local` names.
 - Remote internet access should use HTTPS behind a reverse proxy or a private VPN such as Tailscale. Never port-forward the heat pump/WLAN adapter.
-- The production hostname routes only to the loopback-bound dashboard. It does
-  not route to the BRP069A71 or any other LAN device.
+- The production hostname routes only to the Vercel application. It does not
+  route to the BRP069A71, the Mac, or any other LAN device.
 - `.cloudflared/`, `data/`, Daikin credentials/tokens, application passwords,
   and Cloudflare credential files must remain outside source control.
 - **Disconnect cloud** currently deletes the local tokens. Until server-side
