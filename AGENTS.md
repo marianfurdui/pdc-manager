@@ -19,6 +19,9 @@ Read these files before changing the project:
 - The production app is live on Vercel. Cloudflare points `hp.operagrid.net`
   to Vercel, the custom domain is verified, Basic authentication protects all
   UI/API/static routes, and the OAuth callback is the only public route.
+- Vercel is connected to `github.com/marianfurdui/pdc-manager`: every push to
+  `main` automatically creates and promotes a production deployment for
+  `hp.operagrid.net`; other branches and pull requests receive previews.
 - An Upstash Redis store is attached and application data is encrypted with
   AES-256-GCM before storage. With explicit user approval, the existing local
   ONECTA client configuration and refresh session were migrated and verified;
@@ -52,7 +55,8 @@ redacted payload before adding model-specific assumptions.
   values, user/account IDs, passwords, client secrets, OAuth tokens,
   `data/`, `.cloudflared/`, Cloudflare certificates, or tunnel credentials.
 - Never port-forward or tunnel directly to the BRP069A71. The public hostname
-  must route only to the loopback-bound application server.
+  must route only to the Vercel application, never the Mac or another LAN
+  device.
 - Keep adapter research read-only unless the user explicitly authorizes a
   reviewed state-changing experiment. Do not brute-force credentials, flash
   firmware, bypass TLS controls, or send speculative heat-pump commands.
@@ -62,6 +66,8 @@ redacted payload before adding model-specific assumptions.
   have been validated.
 - The repository intentionally has zero runtime npm dependencies. Node 22+
   is required; Node 24 is recommended.
+- Keep the production `APP_SECRET` stable. Rotating it without re-encrypting
+  the Redis document makes the hosted ONECTA settings unreadable.
 - Use `apply_patch` for edits. Run `npm test` and `npm run check` after code
   changes.
 
