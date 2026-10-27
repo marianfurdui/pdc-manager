@@ -21,6 +21,7 @@ test("house profiles keep known fields and round coordinates", () => {
   assert.throws(() => sanitizeHouse({ dayTemp: 40 }), /dayTemp/);
   assert.throws(() => sanitizeHouse({ emitters: "stove" }), /emitters/);
   assert.equal(sanitizeHouse({ roomThermostats: "some" }).roomThermostats, "some");
+  assert.equal(sanitizeHouse({ elevation: "412" }).elevation, 412);
   assert.deepEqual(sanitizeHouse({ rooms: [{ name: " Dressing ", area: "6.04", target: "15.2" }, { name: "", area: "", target: "" }] }).rooms, [{ name: "Dressing", area: 6, target: 15 }]);
   assert.equal(sanitizeHouse({ rooms: [{ name: "", area: "", target: "" }] }).rooms, undefined);
   assert.throws(() => sanitizeHouse({ rooms: [{ name: "Hall", area: "", target: 20 }] }), /Room 1: area/);

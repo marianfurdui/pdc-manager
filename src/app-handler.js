@@ -31,6 +31,7 @@ const HOUSE_RANGES = {
   showersPerDay: [0, 30],
   slabInsulation: [0, 50],
   floors: [1, 5],
+  elevation: [-100, 3000],
   basementArea: [0, 1000],
   latitude: [-90, 90],
   longitude: [-180, 180],

@@ -59,7 +59,7 @@ if (Number.isFinite(house.latitude) && Number.isFinite(house.longitude)) {
 }
 await journalStore.write(journal);
 
-const { findings, stats } = evaluate({ devices, house, journal, now });
+const { findings, stats, sensorCheck } = evaluate({ devices, house, journal, now });
 const points = devices.flatMap((device) => device.points.map((point) => `${point.type}${point.schedule ? " (schedule)" : ""}: ${point.characteristics.map((item) => item.name).join(", ")}`));
 const missingProfile = ["latitude", "longitude", "area", "occupants", "dayTemp"].filter((key) => !Number.isFinite(house[key]));
 
@@ -72,6 +72,10 @@ for (const item of findings) {
 }
 const usable = stats.filter((month) => month.kwhPerHdd !== null);
 console.log(`\nMonths with kWh per degree-day: ${usable.length}${usable.length ? ` (latest ${usable.at(-1).month}: ${usable.at(-1).kwhPerHdd})` : ""}`);
+console.log(sensorCheck
+  ? `Outdoor sensor versus Open-Meteo: ${sensorCheck.offset > 0 ? "+" : ""}${sensorCheck.offset}°C median over ${sensorCheck.readings} readings on ${sensorCheck.days} days`
+  : "Outdoor sensor versus Open-Meteo: not enough matched readings yet (needs 20 over 3 days)");
+if (!Number.isFinite(house.elevation)) console.log("Home profile has no altitude, so weather data uses the rounded point's altitude.");
 if (weatherNote) console.log(weatherNote);
 if (missingProfile.length) console.log(`Home profile is missing: ${missingProfile.join(", ")}`);
 console.log(`\nStill needed from the indoor unit's installer menu:\n${INSTALLER_CHECKLIST.map((line) => `  - ${line}`).join("\n")}`);

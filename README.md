@@ -261,7 +261,9 @@ Energy review (read-only):
   in a separate encrypted journal: `data/journal.enc.json` locally, the
   `pdc-control:journal` Redis key when hosted;
 - past daily outdoor temperatures come from Open-Meteo using only the
-  location rounded to 0.1° (the profile keeps up to 8 decimals);
+  location rounded to 0.1° (the profile keeps up to 8 decimals) and the
+  house altitude, and about 30 days of hourly temperatures are matched
+  against the heat pump's outdoor sensor as a cross-check;
 - `node scripts/efficiency-audit.mjs` runs the day-one review (one ONECTA
   request, redacted payload saved under `data/audits/`).
 

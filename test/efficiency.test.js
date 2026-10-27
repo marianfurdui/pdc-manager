@@ -160,6 +160,31 @@ test("window-only ventilation gets airing advice in the heating season", () => {
   assert.equal(ids(evaluate({ devices: [device()], house: { ventilation: "recovery" }, journal: emptyJournal(), now: winter })).includes("window-airing"), false);
 });
 
+function sensorJournal(offset, { days = 4, perDay = 6 } = {}) {
+  const journal = emptyJournal();
+  journal.weather = { key: "x", daily: {}, hourly: {} };
+  for (let day = 0; day < days; day += 1) {
+    for (let hour = 8; hour < 8 + perDay; hour += 1) {
+      const t = new Date(Date.UTC(2026, 0, 10 + day, hour, 20)).toISOString();
+      journal.weather.hourly[t.slice(0, 13)] = 2;
+      journal.samples.push({ t, o: 2 + offset + (hour === 9 ? 6 : 0) });
+    }
+  }
+  return journal;
+}
+
+test("the outdoor sensor is compared with weather data at the same hour", () => {
+  const result = evaluate({ devices: [device()], journal: sensorJournal(2.5), now: winter });
+  assert.deepEqual(result.sensorCheck, { offset: 2.5, readings: 24, days: 4 }, "the defrost-like spike is ignored by the median");
+  const item = result.findings.find((finding) => finding.id === "weather-offset");
+  assert.match(item.title, /2\.5°C warmer/);
+  assert.match(item.suggestion, /altitude/);
+  const withAltitude = evaluate({ devices: [device()], house: { elevation: 400 }, journal: sensorJournal(-2), now: winter }).findings.find((finding) => finding.id === "weather-offset");
+  assert.match(withAltitude.suggestion, /colder than the weather data/);
+  assert.equal(ids(evaluate({ devices: [device()], journal: sensorJournal(1), now: winter })).includes("weather-offset"), false);
+  assert.equal(evaluate({ devices: [device()], journal: sensorJournal(3, { days: 2 }), now: winter }).sensorCheck, null);
+});
+
 test("thin insulation over an unheated basement is flagged", () => {
   assert.ok(ids(evaluate({ devices: [device()], house: { belowFloor: "basement", slabInsulation: 5 }, journal: emptyJournal(), now: winter })).includes("floor-loss"));
   assert.equal(ids(evaluate({ devices: [device()], house: { belowFloor: "basement", slabInsulation: 10 }, journal: emptyJournal(), now: winter })).includes("floor-loss"), false);

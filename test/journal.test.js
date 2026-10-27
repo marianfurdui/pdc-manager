@@ -58,12 +58,18 @@ test("weather is fetched with rounded coordinates and cached for the day", async
   const urls = [];
   const fetchImpl = async (url) => {
     urls.push(new URL(url));
-    return new Response(JSON.stringify({ daily: { time: ["2026-10-20", "2026-10-26", "2026-10-27"], temperature_2m_mean: [8, 6, 5] } }));
+    return new Response(JSON.stringify({
+      daily: { time: ["2026-10-20", "2026-10-26", "2026-10-27"], temperature_2m_mean: [8, 6, 5] },
+      hourly: { time: ["2026-10-27T09:00", "2026-10-27T10:00", "2026-10-27T13:00"], temperature_2m: [4, 5, 7] },
+    }));
   };
   const journal = emptyJournal();
   const now = new Date("2026-10-27T12:00:00Z");
   assert.equal(await ensureWeather(journal, { latitude: 46.77123457, longitude: 23.62361234, timeZone: "UTC" }, { now, fetchImpl }), true);
-  assert.equal(urls.length, 2);
+  assert.equal(urls.length, 3);
+  assert.equal(urls[2].searchParams.get("hourly"), "temperature_2m");
+  assert.equal(urls[2].searchParams.get("timezone"), "GMT");
+  assert.deepEqual(journal.weather.hourly, { "2026-10-27T09": 4, "2026-10-27T10": 5 }, "future hours are not stored");
   for (const url of urls) {
     assert.equal(url.searchParams.get("latitude"), "46.8");
     assert.equal(url.searchParams.get("longitude"), "23.6");
@@ -71,8 +77,34 @@ test("weather is fetched with rounded coordinates and cached for the day", async
   assert.equal(urls[0].searchParams.get("start_date"), "2024-10-01");
   assert.equal(journal.weather.daily["2026-10-26"], 6);
   assert.equal(journal.weather.daily["2026-10-27"], undefined, "today is incomplete and is not stored");
-  assert.equal(await ensureWeather(journal, { latitude: 46.7712, longitude: 23.6236, timeZone: "UTC" }, { now, fetchImpl }), false);
-  assert.equal(urls.length, 2);
+  assert.equal(await ensureWeather(journal, { latitude: 46.77123457, longitude: 23.62361234, timeZone: "UTC" }, { now, fetchImpl }), false);
+  assert.equal(urls.length, 3);
+  assert.equal(urls.some((url) => url.searchParams.has("elevation")), false);
+});
+
+test("the house altitude is sent and changing it refetches", async () => {
+  const urls = [];
+  const fetchImpl = async (url) => {
+    urls.push(new URL(url));
+    return new Response(JSON.stringify({ daily: { time: ["2026-10-26"], temperature_2m_mean: [6] }, hourly: { time: [], temperature_2m: [] } }));
+  };
+  const journal = emptyJournal();
+  const now = new Date("2026-10-27T12:00:00Z");
+  await ensureWeather(journal, { latitude: 46.77, longitude: 23.62, elevation: 412.4 }, { now, fetchImpl });
+  assert.ok(urls.every((url) => url.searchParams.get("elevation") === "412"));
+  assert.equal(journal.weather.key, "46.8,23.6,412m");
+  assert.equal(await ensureWeather(journal, { latitude: 46.77, longitude: 23.62, elevation: 500 }, { now, fetchImpl }), true);
+  assert.equal(journal.weather.key, "46.8,23.6,500m");
+});
+
+test("hourly data failing does not lose the daily history", async () => {
+  const fetchImpl = async (url) => (new URL(url).searchParams.has("hourly")
+    ? new Response("{}", { status: 500 })
+    : new Response(JSON.stringify({ daily: { time: ["2026-10-26"], temperature_2m_mean: [6] } })));
+  const journal = emptyJournal();
+  assert.equal(await ensureWeather(journal, { latitude: 1, longitude: 2 }, { now: new Date("2026-10-27T12:00:00Z"), fetchImpl }), true);
+  assert.equal(journal.weather.daily["2026-10-26"], 6);
+  assert.deepEqual(journal.weather.hourly, {});
 });
 
 test("weather failures surface as errors without partial state", async () => {

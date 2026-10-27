@@ -487,6 +487,7 @@ function efficiencyPanel() {
     </li>`).join("")}</ul>` : ""}
     ${setAside.length ? `<details class="change-log"><summary>Set aside for now <span>${setAside.length}</span></summary><ul class="set-aside">${setAside.map((item) => `<li><span>${escapeHtml(item.title)}</span><button class="text-button" data-command="bring-back" data-finding="${escapeHtml(item.id)}">Bring back</button></li>`).join("")}</ul></details>` : ""}
     ${degreeDayChart(stats)}
+    ${data.sensorCheck ? `<p class="muted sensor-check">Heat pump outdoor sensor versus weather data: ${data.sensorCheck.offset > 0 ? "+" : ""}${escapeHtml(formatNumber(data.sensorCheck.offset, 0.1))}°C (median of ${escapeHtml(data.sensorCheck.readings)} readings over ${escapeHtml(data.sensorCheck.days)} days).</p>` : ""}
     ${data.weather?.error ? `<p class="muted">Weather history is unavailable: ${escapeHtml(data.weather.error)}</p>` : ""}
     ${changes.length ? `<details class="change-log"><summary>Recent changes <span>${changes.length}</span></summary><ul>${changes.slice().reverse().slice(0, 10).map((change) => `<li>${escapeHtml(changeText(change))}</li>`).join("")}</ul></details>` : ""}
   </article>`;
@@ -943,7 +944,7 @@ function houseForm(house) {
   return `<details class="panel credentials" ${Object.keys(house).length ? "" : "open"}><summary><div><h2>Your home</h2><p>Used to tailor energy suggestions. Only the location rounded to about 10 km leaves this app, to fetch past outdoor temperatures.</p></div><span class="chip">${Object.keys(house).length ? "Edit" : "Add details"}</span></summary>
     <form id="house-settings" class="settings-form house-form">
       <fieldset class="location"><legend>Location</legend>
-        <div class="location-row">${field("latitude", "Latitude", 'step="any" min="-90" max="90" inputmode="decimal"')}${field("longitude", "Longitude", 'step="any" min="-180" max="180" inputmode="decimal"')}<button type="button" class="secondary" data-command="house-locate">Use this device's location</button></div>
+        <div class="location-row">${field("latitude", "Latitude", 'step="any" min="-90" max="90" inputmode="decimal"')}${field("longitude", "Longitude", 'step="any" min="-180" max="180" inputmode="decimal"')}${field("elevation", "Altitude (m)", 'min="-100" max="3000" step="1" inputmode="numeric"')}<button type="button" class="secondary" data-command="house-locate">Use this device's location</button></div>
         <p class="muted">${located ? `Saved as ${escapeHtml(house.latitude)}, ${escapeHtml(house.longitude)}${house.timeZone ? `, ${escapeHtml(house.timeZone)}` : ""}.` : "Up to 8 decimals are kept. Only a version rounded to one decimal is sent to Open-Meteo."}</p>
       </fieldset>
       <div class="form-grid">
@@ -1193,6 +1194,8 @@ app.addEventListener("click", async (event) => {
       const form = button.closest("form");
       form.elements.latitude.value = position.coords.latitude.toFixed(8);
       form.elements.longitude.value = position.coords.longitude.toFixed(8);
+      // GPS altitude is often missing or tens of metres off; fill it only when offered.
+      if (Number.isFinite(position.coords.altitude) && !form.elements.elevation.value) form.elements.elevation.value = Math.round(position.coords.altitude);
     }, () => toast("Location wasn't shared. Enter it by hand.", true), { maximumAge: 3_600_000, timeout: 15_000 });
     return;
   }

@@ -31,6 +31,10 @@ export const THRESHOLDS = {
   roomSpread: 2,
   mainRoomArea: 10,
   slabInsulationMin: 8,
+  // Heat pump outdoor sensor versus Open-Meteo at the same hour.
+  sensorMinReadings: 20,
+  sensorMinDays: 3,
+  sensorOffset: 1.5,
   // Floor-loss estimate: screed and basement temperatures in the heating
   // season, insulation conductivity, the rest of the floor build-up, and a
   // typical seasonal COP to turn heat into electricity.
@@ -135,6 +139,18 @@ function expectedMaxWater(outdoor, emitters, insulation) {
   // The reduction applies fully at the cold end and fades to none at +15 °C.
   const coldness = (warmOut - clamped) / (warmOut - coldOut);
   return coldWater + ((clamped - coldOut) * (warmWater - coldWater)) / (warmOut - coldOut) - reduction * coldness;
+}
+
+// Compares the unit's outdoor readings with Open-Meteo for the same UTC
+// hour. The median ignores defrost spikes and the odd sunny reading.
+export function sensorCheck(journal) {
+  const hourly = journal?.weather?.hourly || {};
+  const pairs = (journal?.samples || [])
+    .filter((sample) => Number.isFinite(sample.o) && Number.isFinite(hourly[sample.t.slice(0, 13)]))
+    .map((sample) => ({ day: sample.t.slice(0, 10), difference: sample.o - hourly[sample.t.slice(0, 13)] }));
+  const days = new Set(pairs.map((pair) => pair.day)).size;
+  if (pairs.length < THRESHOLDS.sensorMinReadings || days < THRESHOLDS.sensorMinDays) return null;
+  return { offset: Math.round(median(pairs.map((pair) => pair.difference)) * 10) / 10, readings: pairs.length, days };
 }
 
 export function monthlyStats(journal) {
@@ -278,6 +294,18 @@ const rules = [
       `Open windows wide for 5–10 minutes a few times a day, then close them. A tilted window left open for hours keeps cooling the walls and floor${house.roomThermostats && house.roomThermostats !== "none" ? ", and that room's thermostat then keeps its floor loop heating the outside" : ""}.`)];
   },
 
+  function weatherOffset({ sensor, house }) {
+    if (!sensor || Math.abs(sensor.offset) <= THRESHOLDS.sensorOffset) return [];
+    const warmer = sensor.offset > 0;
+    const advice = Number.isFinite(house?.elevation)
+      ? warmer
+        ? "A sensor reading warmer than the weather data often means it gets sun or air blown from the outdoor unit. If it is in shade and the difference stays, the local climate differs from the model; comparisons over time remain valid."
+        : "A sensor reading colder than the weather data usually means a cold, shaded spot or a valley that collects cold air. Comparisons over time remain valid."
+      : "Enter the house altitude in System → Your home. Without it the weather data uses the altitude of a point up to 10 km away.";
+    return [finding("weather-offset", "info", `The heat pump's outdoor sensor reads ${fmt(Math.abs(sensor.offset))}°C ${warmer ? "warmer" : "colder"} than the weather data`,
+      `Median difference over ${sensor.readings} readings on ${sensor.days} days.`, advice)];
+  },
+
   function floorLoss({ house, emitters }) {
     if (house?.belowFloor !== "basement" || !Number.isFinite(house?.slabInsulation) || !["underfloor", "mixed"].includes(emitters)) return [];
     if (house.slabInsulation >= THRESHOLDS.slabInsulationMin) return [];
@@ -417,8 +445,9 @@ export function evaluate({ devices = [], house = {}, journal = {}, now = new Dat
     today,
     emitters: house?.emitters || "underfloor",
     recentMean: recentMeanOutdoor(journal, today),
+    sensor: sensorCheck(journal),
   };
-  const findings = device ? rules.flatMap((rule) => rule(context)) : rules.filter((rule) => ["efficiencyTrend", "hotWaterShare", "annualBenchmark"].includes(rule.name)).flatMap((rule) => rule(context));
+  const findings = device ? rules.flatMap((rule) => rule(context)) : rules.filter((rule) => ["efficiencyTrend", "hotWaterShare", "annualBenchmark", "weatherOffset"].includes(rule.name)).flatMap((rule) => rule(context));
   findings.sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
-  return { findings, stats, recentMeanOutdoor: context.recentMean === null ? null : Math.round(context.recentMean * 10) / 10 };
+  return { findings, stats, sensorCheck: context.sensor, recentMeanOutdoor: context.recentMean === null ? null : Math.round(context.recentMean * 10) / 10 };
 }

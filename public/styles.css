@@ -260,7 +260,8 @@ label > span { display: block; margin-bottom: 6px; color: var(--muted); font-siz
 /* ---------- Your home ---------- */
 .house-form fieldset { margin: 0; padding: 0; border: 0; }
 .house-form legend { margin-bottom: 8px; font-weight: 600; }
-.location-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 10px; align-items: end; }
+.location-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.7fr) auto; gap: 10px; align-items: end; }
+.sensor-check { margin-top: 12px; }
 .house-form .muted { margin-top: 6px; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
 .house-form > .primary { justify-self: start; }
@@ -351,7 +352,7 @@ label > span { display: block; margin-bottom: 6px; color: var(--muted); font-siz
   .legend em { margin-left: 0; width: 100%; }
   .finding { flex-direction: column; gap: 10px; }
   .finding-actions { flex-direction: row; align-items: center; }
-  .location-row { grid-template-columns: 1fr 1fr; }
+  .location-row { grid-template-columns: 1fr 1fr 1fr; }
   .location-row .secondary { grid-column: 1 / -1; }
   .room-row { grid-template-columns: 1fr 1fr 40px; padding-bottom: 10px; border-bottom: 1px solid var(--rule); }
   .room-row label:first-child { grid-column: 1 / -1; }

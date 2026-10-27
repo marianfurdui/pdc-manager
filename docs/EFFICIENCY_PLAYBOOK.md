@@ -160,6 +160,19 @@ guide for `ETVX16S23D9W`, not guessed):
   from ONECTA's rolling arrays, weather, and a log of every setting changed
   through the dashboard.
 - ONECTA's `m` array holds 24 months, so a baseline exists on day one.
+- **Weather accuracy.** Open-Meteo receives the location rounded to 0.1°
+  (about 8–11 km here), which is no coarser than its model grids. The
+  house altitude from the profile is sent as `elevation`, so temperatures
+  are corrected for the house rather than for the rounded point
+  (about 0.65 °C per 100 m).
+- **Sensor cross-check** (`sensorCheck` in `src/lib/efficiency.js`). About
+  30 days of hourly Open-Meteo temperatures are kept and matched to the
+  heat pump's outdoor readings at the same UTC hour. The median difference
+  over at least 20 readings on 3 days is shown in the dashboard and by the
+  audit script; beyond ±1.5 °C it becomes a finding. A consistent offset
+  shifts absolute kWh per degree-day but not before/after comparisons. The
+  unit's sensor itself reads high in sun and during defrost, so check its
+  position before blaming the weather data.
 
 The ONECTA array alignment assumed here (`w` = last week Monday to Sunday,
 then this week; `m` = last year January to December, then this year) must be
