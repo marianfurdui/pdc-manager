@@ -91,6 +91,14 @@ test("leaving water above the underfloor band needs enough readings", () => {
   assert.equal(ids(radiators).includes("water-too-hot"), false);
 });
 
+test("a well-insulated house is held to a lower water temperature", () => {
+  // At 0 °C outside the underfloor band allows 31 °C; well insulated, 29.2 °C.
+  const journal = { ...emptyJournal(), samples: heatingSamples(12, { o: 0, lw: 33 }) };
+  assert.equal(ids(evaluate({ devices: [device()], house: { insulation: "average" }, journal, now: winter })).includes("water-too-hot"), false);
+  const insulated = evaluate({ devices: [device()], house: { insulation: "new" }, journal, now: winter });
+  assert.match(insulated.findings.find((item) => item.id === "water-too-hot").evidence, /well-insulated/);
+});
+
 test("samples taken while hot water heats are ignored", () => {
   const journal = { ...emptyJournal(), samples: heatingSamples(12, { o: 5, lw: 50, ts: "heating" }) };
   assert.equal(ids(evaluate({ devices: [device()], journal, now: winter })).includes("water-too-hot"), false);
@@ -122,6 +130,44 @@ test("room thermostats on underfloor heating get advice tied to the target", () 
   assert.match(item.suggestion, /22–23°C/);
   assert.equal(ids(evaluate({ devices: [device()], house: { roomThermostats: "none" }, journal: emptyJournal(), now: winter })).includes("room-thermostats"), false);
   assert.equal(ids(evaluate({ devices: [device()], house: { roomThermostats: "all", emitters: "radiators" }, journal: emptyJournal(), now: winter })).includes("room-thermostats"), false);
+});
+
+const rooms = [
+  { name: "Living and kitchen", area: 55, target: 21 },
+  { name: "Bedroom", area: 16, target: 21 },
+  { name: "Bathroom", area: 7, target: 19 },
+  { name: "Office", area: 10, target: 19 },
+  { name: "Small bedroom", area: 9, target: 17 },
+  { name: "Dressing", area: 5, target: 15 },
+];
+
+test("rooms kept well below the main rooms are named for balancing", () => {
+  const item = evaluate({ devices: [device()], house: { rooms }, journal: emptyJournal(), now: winter }).findings.find((finding) => finding.id === "room-balance");
+  assert.match(item.evidence, /^Dressing 15°C, Small bedroom 17°C, Bathroom 19°C, Office 19°C are 2°C or more below the main rooms \(21°C\), 31 m²/);
+  const even = rooms.map((room) => ({ ...room, target: 21 }));
+  assert.equal(ids(evaluate({ devices: [device()], house: { rooms: even }, journal: emptyJournal(), now: winter })).includes("room-balance"), false);
+});
+
+test("per-room data changes the thermostat advice", () => {
+  const item = evaluate({ devices: [device()], house: { roomThermostats: "all", rooms }, journal: emptyJournal(), now: winter }).findings.find((finding) => finding.id === "room-thermostats");
+  assert.match(item.suggestion, /each room's thermostat/);
+});
+
+test("window-only ventilation gets airing advice in the heating season", () => {
+  const item = evaluate({ devices: [device()], house: { ventilation: "windows", insulation: "new", roomThermostats: "all" }, journal: emptyJournal(), now: winter }).findings.find((finding) => finding.id === "window-airing");
+  assert.match(item.evidence, /well-insulated/);
+  assert.match(item.suggestion, /thermostat/);
+  assert.equal(ids(evaluate({ devices: [device()], house: { ventilation: "recovery" }, journal: emptyJournal(), now: winter })).includes("window-airing"), false);
+});
+
+test("thin insulation over an unheated basement is flagged", () => {
+  assert.ok(ids(evaluate({ devices: [device()], house: { belowFloor: "basement", slabInsulation: 5 }, journal: emptyJournal(), now: winter })).includes("floor-loss"));
+  assert.equal(ids(evaluate({ devices: [device()], house: { belowFloor: "basement", slabInsulation: 10 }, journal: emptyJournal(), now: winter })).includes("floor-loss"), false);
+  assert.equal(ids(evaluate({ devices: [device()], house: { belowFloor: "basement" }, journal: emptyJournal(), now: winter })).includes("floor-loss"), false);
+  // 80 m² at U ≈ 0.55 and a 17 °C difference loses about 0.75 kW.
+  const sized = evaluate({ devices: [device()], house: { belowFloor: "basement", slabInsulation: 5, basementArea: 80 }, journal: emptyJournal(), now: winter }).findings.find((finding) => finding.id === "floor-loss");
+  assert.match(sized.evidence, /80 m² that is roughly 0\.8 kW/);
+  assert.match(sized.estimate, /^about \d+ kWh of electricity a year with 10 cm added$/);
 });
 
 test("hot water above 50 °C and boost are reported", () => {
@@ -200,4 +246,5 @@ test("yearly benchmark needs floor area and a full year", () => {
   assert.ok(ids(evaluate({ journal, house: { area: 50, insulation: "new" }, now })).includes("benchmark"));
   assert.equal(ids(evaluate({ journal, house: { area: 1000, insulation: "new" }, now })).includes("benchmark"), false);
   assert.equal(ids(evaluate({ journal, now })).includes("benchmark"), false);
+  assert.ok(ids(evaluate({ journal, house: { rooms: [{ name: "All", area: 50, target: 21 }], insulation: "new" }, now })).includes("benchmark"), "falls back to the rooms' total area");
 });

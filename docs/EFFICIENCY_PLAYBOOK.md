@@ -17,7 +17,72 @@ one at a time, with a measurement period after each change.
 | Heat emitters | Underfloor heating throughout | Owner |
 | Tariff | Single flat rate | Owner |
 | Solar | None | Owner |
+| Walls | 36 cm BCA (autoclaved aerated concrete) + 10 cm basalt wool | Owner; U ≈ 0.16 W/m²K estimated |
+| Roof | 25 cm basalt wool | Owner; U ≈ 0.14–0.18 W/m²K estimated, depending on rafter bridging |
+| Windows | Double glazing, wood frames | Owner; Uw ≈ 1.1–1.4 W/m²K if low-e with gas fill, ≈ 2.7 if older; age and glass type to be confirmed |
+| Heated area | About 160 m² over two floors | Owner; ground floor over the basement assumed about 80 m² |
+| Below the heated floor | Unheated basement without floor heating, 5 cm insulation under the heated slab | Owner; floor U ≈ 0.5–0.6 W/m²K estimated |
+| Ventilation | Opening windows only | Owner |
 | Room thermostats | A floor thermostat in every room | Owner; setpoints and whether they drive manifold actuators to be confirmed |
+
+The U-values are estimates from typical conductivities (BCA about
+0.11 W/mK, basalt wool about 0.037 W/mK) and surface resistances. They are
+well inside Romania's nZEB requirements, so the profile uses the
+"new build, well insulated" category, and the water-temperature check is
+about 3 °C stricter at the cold end.
+
+Two consequences shape this review:
+
+- **Very cool water should be enough.** With envelope losses this low,
+  underfloor heating can typically run on about 25–30 °C for most of the
+  winter. Every degree of curve that can come off is worth having.
+- **The 14 kW unit is probably oversized for the load.** On mild days its
+  minimum output can exceed the house's heat loss, so it cycles on and off.
+  Cycling costs efficiency and wears the compressor, and room thermostats
+  closing loops make it worse. A low curve, open loops and no setbacks keep
+  it running long and slow. Check compressor running hours against starts
+  on review day: long runs per start are good, many short runs are not.
+
+Room temperatures the owner keeps: living room and kitchen 20–21 °C,
+bedrooms about 21 °C, two bathrooms 19 °C, office 19 °C, a small bedroom
+17 °C and the dressing room 15 °C. The water must suit the 21 °C rooms, so
+the cooler rooms' thermostats will hold their loops shut much of the time.
+Balancing the manifold so those loops get less flow, rather than switching
+on and off, is likely the first practical change (the `room-balance`
+rule). Room areas go into **System → Your home → Rooms**.
+
+With walls around 0.16 W/m²K, the windows (around 1.1–1.4 W/m²K even if
+modern) and the floor over the unheated basement are probably where most
+of the remaining heat goes.
+
+The floor is the clearest building improvement. Floor heating keeps the
+screed at about 28 °C, and only 5 cm of insulation separates it from a
+basement at roughly 10–12 °C. That is about 9–10 W per m² of heated floor
+lost downwards. Only the ground floor sits over the basement (the upper
+floor's downward heat goes into heated rooms), so with about 80 m² that is
+roughly 0.75 kW continuously through the heating season, around 900 kWh of
+electricity a year at a seasonal COP of 4. Insulating the basement ceiling from below
+with 10 cm or more of mineral wool or EPS would cut that by about two
+thirds; it is usually simple to install because the ceiling is
+accessible. These are estimates from typical conductivities; the measured
+kWh per degree-day before and after is the real test.
+
+Ventilation is by opening windows only. With an envelope this tight, fresh
+air is likely a third or more of the heat loss. Short, wide-open airing
+(5–10 minutes, a few times a day) swaps the air without cooling the
+thermal mass; tilted windows left open for hours keep the floor loop of
+that room heating the outside. Watch indoor humidity: a tight house aired
+too little risks condensation and mould. Heat-recovery ventilation is the
+long-term upgrade if comfort or humidity becomes a problem.
+
+**Owner constraint (2026-10-27):** insulating the basement ceiling and
+changing how rooms are ventilated are not possible for now. The review
+focuses on what can change today: heat-pump settings (curve, offset,
+setbacks, hot water) and manifold balancing. Those two suggestions can be
+set aside in the dashboard ("Not now") and brought back later.
+
+Still unknown: the exact ground-floor area over the basement (enter it in
+**Your home**) and window age and glass type.
 
 On a flat tariff with no solar, **when** electricity is used costs nothing
 extra. The only lever is **how much** is used, which means raising the

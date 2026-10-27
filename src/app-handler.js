@@ -20,6 +20,8 @@ const HOUSE_CHOICES = {
   solar: ["none", "pv", "pvBattery"],
   insulation: ["poor", "average", "renovated", "new"],
   roomThermostats: ["none", "some", "all"],
+  belowFloor: ["ground", "basement", "heated"],
+  ventilation: ["windows", "extract", "recovery"],
 };
 const HOUSE_RANGES = {
   area: [10, 2000],
@@ -27,6 +29,9 @@ const HOUSE_RANGES = {
   dayTemp: [15, 25],
   nightTemp: [12, 25],
   showersPerDay: [0, 30],
+  slabInsulation: [0, 50],
+  floors: [1, 5],
+  basementArea: [0, 1000],
   latitude: [-90, 90],
   longitude: [-180, 180],
 };
@@ -44,6 +49,20 @@ export function sanitizeHouse(input = {}) {
     if (!input[key]) continue;
     if (!choices.includes(input[key])) throw new AppError(`Unknown ${key}`, 400, "INVALID_HOUSE");
     house[key] = input[key];
+  }
+  if (input.rooms !== undefined) {
+    if (!Array.isArray(input.rooms) || input.rooms.length > 30) throw new AppError("Up to 30 rooms can be saved", 400, "INVALID_HOUSE");
+    house.rooms = input.rooms
+      .map((room) => ({ name: String(room?.name ?? "").replace(/[\u0000-\u001f]/g, "").trim().slice(0, 40), area: room?.area, target: room?.target }))
+      .filter((room) => room.name || (room.area !== "" && room.area !== undefined && room.area !== null))
+      .map((room, index) => {
+        const area = Number(room.area);
+        const target = Number(room.target);
+        if (!Number.isFinite(area) || area < 1 || area > 300) throw new AppError(`Room ${index + 1}: area must be between 1 and 300 m²`, 400, "INVALID_HOUSE");
+        if (!Number.isFinite(target) || target < 5 || target > 28) throw new AppError(`Room ${index + 1}: temperature must be between 5 and 28 °C`, 400, "INVALID_HOUSE");
+        return { name: room.name || `Room ${index + 1}`, area: Math.round(area * 10) / 10, target: Math.round(target * 2) / 2 };
+      });
+    if (!house.rooms.length) delete house.rooms;
   }
   if (input.timeZone) {
     try {
@@ -128,6 +147,7 @@ export async function createRequestHandler({
         checkedAt: settings.local?.checkedAt || "",
       } : {},
       house: settings.house || {},
+      setAside: settings.efficiency?.setAside || [],
       onecta: {
         clientId: settings.onecta?.clientId || "",
         hasClientSecret: Boolean(settings.onecta?.clientSecret),
@@ -157,6 +177,13 @@ export async function createRequestHandler({
       if (body.clientId !== undefined) settings.onecta.clientId = String(body.clientId).trim();
       if (body.clientSecret) settings.onecta.clientSecret = String(body.clientSecret);
       if (body.house !== undefined) settings.house = sanitizeHouse(body.house);
+      if (body.setAside !== undefined) {
+        // Suggestions the owner can't act on for now, by finding id.
+        if (!Array.isArray(body.setAside) || body.setAside.length > 50 || !body.setAside.every((id) => typeof id === "string" && /^[a-z0-9-]{1,60}$/.test(id))) {
+          throw new AppError("Invalid list of set-aside suggestions", 400, "INVALID_SET_ASIDE");
+        }
+        settings.efficiency = { ...settings.efficiency, setAside: [...new Set(body.setAside)] };
+      }
       await store.write(settings);
       return sendJson(response, 200, await settingsSummary(request));
     }
@@ -270,8 +297,10 @@ export async function createRequestHandler({
         }
       }
       const result = evaluate({ devices, house, journal });
+      const setAside = new Set(settings.efficiency?.setAside || []);
       return sendJson(response, 200, {
         ...result,
+        findings: result.findings.map((item) => (setAside.has(item.id) ? { ...item, setAside: true } : item)),
         stats: result.stats.slice(-24),
         changes: journal.changes.slice(-20),
         samples: journal.samples.length,

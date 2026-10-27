@@ -471,18 +471,21 @@ function degreeDayChart(stats) {
 function efficiencyPanel() {
   const data = state.efficiency;
   if (!data) return "";
-  const { findings = [], stats = [], changes = [] } = data;
+  const { stats = [], changes = [] } = data;
+  const findings = (data.findings || []).filter((item) => !item.setAside);
+  const setAside = (data.findings || []).filter((item) => item.setAside);
   const count = findings.filter((item) => item.severity !== "info").length;
   const summary = findings.length
     ? `${count ? `${count} change${count === 1 ? "" : "s"} worth trying` : "Nothing urgent"}, based on the current settings${data.samples ? ` and ${data.samples} readings` : ""}. Try one at a time and give each a week.`
-    : "Nothing to change right now. The settings Daikin reports look efficient.";
+    : setAside.length ? "Nothing else to change right now." : "Nothing to change right now. The settings Daikin reports look efficient.";
   return `<article class="panel efficiency">
     <header class="panel-head"><div><h2>Ways to use less energy</h2><p>${escapeHtml(summary)}</p></div></header>
     ${data.profileComplete ? "" : `<p class="profile-hint">Add your home's details in <a href="#system">System</a> so suggestions match your house and weather.</p>`}
     ${findings.length ? `<ul class="findings">${findings.map((item) => `<li class="finding is-${escapeHtml(item.severity)}">
       <div><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.evidence)}</p><p>${escapeHtml(item.suggestion)}</p>${item.estimate ? `<span class="estimate">Estimate: ${escapeHtml(item.estimate)}</span>` : ""}</div>
-      ${item.control ? `<a class="secondary" href="#${escapeHtml(item.control)}">${escapeHtml(ROUTE_NAMES[item.control] || "Open")}</a>` : ""}
+      <div class="finding-actions">${item.control ? `<a class="secondary" href="#${escapeHtml(item.control)}">${escapeHtml(ROUTE_NAMES[item.control] || "Open")}</a>` : ""}<button class="text-button" data-command="set-aside" data-finding="${escapeHtml(item.id)}">Not now</button></div>
     </li>`).join("")}</ul>` : ""}
+    ${setAside.length ? `<details class="change-log"><summary>Set aside for now <span>${setAside.length}</span></summary><ul class="set-aside">${setAside.map((item) => `<li><span>${escapeHtml(item.title)}</span><button class="text-button" data-command="bring-back" data-finding="${escapeHtml(item.id)}">Bring back</button></li>`).join("")}</ul></details>` : ""}
     ${degreeDayChart(stats)}
     ${data.weather?.error ? `<p class="muted">Weather history is unavailable: ${escapeHtml(data.weather.error)}</p>` : ""}
     ${changes.length ? `<details class="change-log"><summary>Recent changes <span>${changes.length}</span></summary><ul>${changes.slice().reverse().slice(0, 10).map((change) => `<li>${escapeHtml(changeText(change))}</li>`).join("")}</ul></details>` : ""}
@@ -924,8 +927,14 @@ const HOUSE_OPTIONS = {
   solar: [["none", "No solar"], ["pv", "Solar panels"], ["pvBattery", "Solar panels and battery"]],
   insulation: [["poor", "Little or none"], ["average", "Average"], ["renovated", "Renovated, insulated"], ["new", "New build, well insulated"]],
   roomThermostats: [["none", "No room thermostats"], ["some", "In some rooms"], ["all", "In every room"]],
+  belowFloor: [["ground", "Ground (slab on soil)"], ["basement", "Unheated basement"], ["heated", "Another heated floor"]],
+  ventilation: [["windows", "Opening windows"], ["extract", "Extract fans"], ["recovery", "Heat-recovery ventilation"]],
 };
-const HOUSE_DEFAULTS = { emitters: "underfloor", tariff: "flat", solar: "none", insulation: "average", roomThermostats: "all" };
+const HOUSE_DEFAULTS = { emitters: "underfloor", tariff: "flat", solar: "none", insulation: "new", roomThermostats: "all", belowFloor: "basement", ventilation: "windows" };
+
+function roomRow(room = {}) {
+  return `<div class="room-row"><label><span>Room</span><input name="roomName" maxlength="40" value="${escapeHtml(room.name ?? "")}" autocomplete="off"></label><label><span>Area (m²)</span><input name="roomArea" type="number" min="1" max="300" step="0.1" inputmode="decimal" value="${escapeHtml(room.area ?? "")}"></label><label><span>Temperature (°C)</span><input name="roomTarget" type="number" min="5" max="28" step="0.5" inputmode="decimal" value="${escapeHtml(room.target ?? "")}"></label><button type="button" class="remove-button" data-command="house-remove-room" aria-label="Remove room"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17"/></svg></button></div>`;
+}
 
 function houseForm(house) {
   const field = (name, label, attributes) => `<label><span>${label}</span><input name="${name}" type="number" value="${escapeHtml(house[name] ?? "")}" ${attributes}></label>`;
@@ -948,7 +957,17 @@ function houseForm(house) {
         ${select("tariff", "Electricity price")}
         ${select("solar", "Solar")}
         ${select("roomThermostats", "Floor thermostats in rooms")}
+        ${select("belowFloor", "Below the heated floor")}
+        ${field("floors", "Heated floors", 'min="1" max="5" step="1"')}
+        ${field("basementArea", "Heated floor area over the basement (m²)", 'min="0" max="1000" step="1"')}
+        ${field("slabInsulation", "Insulation under the heated floor (cm)", 'min="0" max="50" step="1"')}
+        ${select("ventilation", "Fresh air comes from")}
       </div>
+      <fieldset class="rooms"><legend>Rooms</legend>
+        <p class="muted">Each heated room's floor area and the temperature you keep it at. Rooms kept much cooler than the rest affect how the floor loops should be balanced.${house.rooms?.length ? ` Saved rooms add up to ${escapeHtml(formatNumber(house.rooms.reduce((sum, room) => sum + room.area, 0)))} m².` : ""}</p>
+        <div class="room-list">${(house.rooms?.length ? house.rooms : [{}]).map(roomRow).join("")}</div>
+        <button type="button" class="add-change" data-command="house-add-room">Add room</button>
+      </fieldset>
       <button class="primary">Save home details</button>
     </form>
   </details>`;
@@ -1094,7 +1113,13 @@ app.addEventListener("submit", async (event) => {
     return;
   }
   if (form.matches("#house-settings")) {
-    const house = Object.fromEntries(new FormData(form));
+    const data = new FormData(form);
+    const names = data.getAll("roomName");
+    const areas = data.getAll("roomArea");
+    const targets = data.getAll("roomTarget");
+    for (const key of ["roomName", "roomArea", "roomTarget"]) data.delete(key);
+    const house = Object.fromEntries(data);
+    house.rooms = names.map((name, index) => ({ name, area: areas[index], target: targets[index] }));
     house.timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     await withPending(form.querySelector("button:not([type])"), async () => {
       await request("/api/settings", { method: "PUT", body: JSON.stringify({ house }) });
@@ -1139,6 +1164,28 @@ app.addEventListener("click", async (event) => {
     if (Number.isFinite(entry.leaf.min)) next = Math.max(entry.leaf.min, next);
     if (Number.isFinite(entry.leaf.max)) next = Math.min(entry.leaf.max, next);
     return queueWrite(device, entry, next, WRITE_DELAY);
+  }
+  if (command === "set-aside" || command === "bring-back") {
+    const current = new Set(state.settings?.setAside || []);
+    if (command === "set-aside") current.add(button.dataset.finding);
+    else current.delete(button.dataset.finding);
+    return withPending(button, async () => {
+      state.settings = await request("/api/settings", { method: "PUT", body: JSON.stringify({ setAside: [...current] }) });
+      toast(command === "set-aside" ? "Set aside. Find it at the bottom of the list." : "Back on the list");
+      await loadEfficiency();
+    });
+  }
+  if (command === "house-add-room") {
+    const list = button.closest("form").querySelector(".room-list");
+    list.insertAdjacentHTML("beforeend", roomRow());
+    list.lastElementChild.querySelector("input").focus();
+    return;
+  }
+  if (command === "house-remove-room") {
+    const list = button.closest(".room-list");
+    button.closest(".room-row").remove();
+    if (!list.children.length) list.insertAdjacentHTML("beforeend", roomRow());
+    return;
   }
   if (command === "house-locate") {
     if (!navigator.geolocation) return toast("This browser can't share its location. Enter it by hand.", true);

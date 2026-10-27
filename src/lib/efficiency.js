@@ -17,6 +17,8 @@ export const THRESHOLDS = {
   tankSuggested: 48,
   // Highest sensible leaving water at +15 °C and -10 °C outside.
   curve: { underfloor: [[15, 25], [-10, 35]], mixed: [[15, 27], [-10, 42]], radiators: [[15, 30], [-10, 50]], fancoil: [[15, 30], [-10, 45]] },
+  // A well-insulated house loses less heat, so the same floor needs cooler water.
+  insulatedCurveReduction: { new: 3, renovated: 1.5 },
   curveMargin: 3,
   overshoot: 0.7,
   minSamples: 10,
@@ -25,6 +27,14 @@ export const THRESHOLDS = {
   dhwShare: 0.35,
   trendChange: 0.1,
   minMonthHdd: 30,
+  // Rooms this much cooler than the main rooms usually have their loops shut.
+  roomSpread: 2,
+  mainRoomArea: 10,
+  slabInsulationMin: 8,
+  // Floor-loss estimate: screed and basement temperatures in the heating
+  // season, insulation conductivity, the rest of the floor build-up, and a
+  // typical seasonal COP to turn heat into electricity.
+  floorLoss: { screed: 28, basement: 11, conductivity: 0.035, otherResistance: 0.37, seasonDays: 200, cop: 4 },
   // Rough electricity use for heating plus hot water, kWh per m² per year.
   benchmark: { new: 25, renovated: 40, average: 55, poor: 80 },
 };
@@ -38,6 +48,8 @@ export const INSTALLER_CHECKLIST = [
   "Control method: leaving-water, external room thermostat, or the unit's room thermostat",
   "Water pump mode: continuous, sampling or on demand",
   "Hot water: reheat mode, hysteresis and maximum temperature",
+  "Where the unit's own room sensor or controller is mounted, if room temperature control is used",
+  "Compressor running hours and number of starts, if the information menu shows them (short runs mean the unit is cycling)",
   "Room thermostats: which rooms, their current setpoints, and whether they open and close actuators on the floor manifold",
   "Manifold: any bypass valve, buffer tank or separate circulation pump",
 ];
@@ -116,10 +128,13 @@ function heatingSamples(journal) {
   return (journal?.samples || []).filter((sample) => sample.cp !== false && /heating/i.test(sample.cs || "") && !/heating/i.test(sample.ts || ""));
 }
 
-function expectedMaxWater(outdoor, emitters) {
+function expectedMaxWater(outdoor, emitters, insulation) {
   const [[warmOut, warmWater], [coldOut, coldWater]] = THRESHOLDS.curve[emitters] || THRESHOLDS.curve.underfloor;
   const clamped = Math.min(warmOut, Math.max(coldOut, outdoor));
-  return coldWater + ((clamped - coldOut) * (warmWater - coldWater)) / (warmOut - coldOut);
+  const reduction = THRESHOLDS.insulatedCurveReduction[insulation] || 0;
+  // The reduction applies fully at the cold end and fades to none at +15 °C.
+  const coldness = (warmOut - clamped) / (warmOut - coldOut);
+  return coldWater + ((clamped - coldOut) * (warmWater - coldWater)) / (warmOut - coldOut) - reduction * coldness;
 }
 
 export function monthlyStats(journal) {
@@ -199,14 +214,14 @@ const rules = [
       { estimate: `${percent(THRESHOLDS.savingPerWaterDegree)} better efficiency per °C of water`, control: "controls" })];
   },
 
-  function waterTooHot({ journal, emitters }) {
+  function waterTooHot({ journal, emitters, house }) {
     const excess = heatingSamples(journal).filter((sample) => Number.isFinite(sample.o) && Number.isFinite(sample.lw))
-      .map((sample) => sample.lw - expectedMaxWater(sample.o, emitters));
+      .map((sample) => sample.lw - expectedMaxWater(sample.o, emitters, house?.insulation));
     if (excess.length < THRESHOLDS.minSamples) return [];
     const typical = median(excess);
     if (typical <= THRESHOLDS.curveMargin) return [];
     return [finding("water-too-hot", "suggest", "Heating water is hotter than this system should need",
-      `Leaving water is typically ${fmt(typical)}°C above the usual maximum for ${emitters} heating at the same outdoor temperature (${excess.length} readings).`,
+      `Leaving water is typically ${fmt(typical)}°C above the usual maximum for ${emitters} heating${THRESHOLDS.insulatedCurveReduction[house?.insulation] ? " in a well-insulated house" : ""} at the same outdoor temperature (${excess.length} readings).`,
       "Ask for (or read) the weather-curve points on the indoor unit. Lowering the curve is usually the single biggest efficiency gain for floor heating.",
       { estimate: `${percent(typical * THRESHOLDS.savingPerWaterDegree)} better efficiency` })];
   },
@@ -232,11 +247,50 @@ const rules = [
   function roomThermostats({ house, emitters, device }) {
     if (!["some", "all"].includes(house?.roomThermostats) || !["underfloor", "mixed"].includes(emitters)) return [];
     const target = activeSetpoint(climatePoint(device), ["roomTemperature"])?.leaf.value;
-    const above = Number.isFinite(target) ? `${fmt(target + 1)}–${fmt(target + 2)}°C` : "1–2°C above the temperature you want";
+    const advice = house.rooms?.length
+      ? "Set each room's thermostat 1–2°C above the temperature you want in that room, so loops stay open and the weather curve does the regulating. Keep at least the largest rooms always open."
+      : `Set the room thermostats to ${Number.isFinite(target) ? `${fmt(target + 1)}–${fmt(target + 2)}°C` : "1–2°C above the temperature you want"}, so loops stay open and the weather curve does the regulating. Close loops only in rooms you deliberately keep cooler, and keep at least the largest rooms always open.`;
     return [finding("room-thermostats", "info", "Room thermostats can work against the weather curve",
       `Your profile says ${house.roomThermostats === "all" ? "every room has" : "some rooms have"} a floor thermostat. When they close loops, less water flows, the heat pump needs hotter water for the remaining rooms and starts and stops more often.`,
-      `Set the room thermostats to ${above}, so loops stay open and the weather curve does the regulating. Close loops only in rooms you deliberately keep cooler, and keep at least the largest rooms always open.`,
+      advice,
       { estimate: "often a few % from steadier running and lower water temperature" })];
+  },
+
+  function roomBalance({ house, emitters }) {
+    const rooms = (house?.rooms || []).filter((room) => Number.isFinite(room.target) && Number.isFinite(room.area));
+    if (rooms.length < 2 || !["underfloor", "mixed"].includes(emitters)) return [];
+    const main = rooms.filter((room) => room.area >= THRESHOLDS.mainRoomArea);
+    const reference = Math.max(...(main.length ? main : rooms).map((room) => room.target));
+    const cool = rooms.filter((room) => room.target <= reference - THRESHOLDS.roomSpread).sort((a, b) => a.target - b.target);
+    if (!cool.length) return [];
+    const area = cool.reduce((sum, room) => sum + room.area, 0);
+    return [finding("room-balance", "suggest", "Cooler rooms will keep their floor loops shut most of the time",
+      `${cool.map((room) => `${room.name} ${fmt(room.target)}°C`).join(", ")} ${cool.length === 1 ? "is" : "are"} ${fmt(reference - cool.at(-1).target)}°C or more below the main rooms (${fmt(reference)}°C), ${fmt(area, 0)} m² in total. The water has to suit the warmest rooms, so these thermostats switch their loops off and on all day.`,
+      "Balance the manifold: turn down the flow on these rooms' loops (balancing valves or flow meters) until each settles near its temperature with the loop open, then keep its thermostat 1–2°C above that as a limit. Keeping their doors closed helps.",
+      { estimate: "steadier running and less cycling; the gain shows in kWh per degree-day" })];
+  },
+
+  function windowAiring({ house, recentMean }) {
+    if (house?.ventilation !== "windows" || (recentMean !== null && recentMean >= THRESHOLDS.heatingSeasonMean)) return [];
+    const insulated = ["new", "renovated"].includes(house.insulation);
+    return [finding("window-airing", "info", "Air rooms in short bursts, not with tilted windows",
+      `Fresh air comes only from opening windows${insulated ? ", and in a well-insulated house that is one of the largest heat losses" : ""}.`,
+      `Open windows wide for 5–10 minutes a few times a day, then close them. A tilted window left open for hours keeps cooling the walls and floor${house.roomThermostats && house.roomThermostats !== "none" ? ", and that room's thermostat then keeps its floor loop heating the outside" : ""}.`)];
+  },
+
+  function floorLoss({ house, emitters }) {
+    if (house?.belowFloor !== "basement" || !Number.isFinite(house?.slabInsulation) || !["underfloor", "mixed"].includes(emitters)) return [];
+    if (house.slabInsulation >= THRESHOLDS.slabInsulationMin) return [];
+    const { screed, basement, conductivity, otherResistance, seasonDays, cop } = THRESHOLDS.floorLoss;
+    const uValue = (cm) => 1 / (otherResistance + cm / 100 / conductivity);
+    const area = Number.isFinite(house.basementArea) && house.basementArea > 0 ? house.basementArea : null;
+    const watts = area ? area * uValue(house.slabInsulation) * (screed - basement) : null;
+    const saved = area ? watts - area * uValue(house.slabInsulation + 10) * (screed - basement) : null;
+    const seasonKwh = (power) => (power * 24 * seasonDays) / 1000 / cop;
+    return [finding("floor-loss", "suggest", "Floor heating loses heat into the unheated basement",
+      `The heated floor sits over an unheated basement with ${fmt(house.slabInsulation, 0)} cm of insulation between them${area ? `. Over ${fmt(area, 0)} m² that is roughly ${fmt(watts / 1000, 1)} kW lost downwards through the heating season` : ""}.`,
+      "Underfloor pipes heat downwards as well as up. Insulating the basement ceiling (10 cm or more of mineral wool or EPS) is usually one of the cheapest permanent savings for this layout.",
+      area ? { estimate: `about ${Math.round(seasonKwh(saved) / 50) * 50} kWh of electricity a year with 10 cm added` } : {})];
   },
 
   function tankTarget({ device, house }) {
@@ -336,11 +390,13 @@ const rules = [
   },
 
   function annualBenchmark({ stats, house }) {
-    if (!Number.isFinite(house?.area) || house.area <= 0) return [];
+    const roomsArea = (house?.rooms || []).reduce((sum, room) => sum + (Number.isFinite(room.area) ? room.area : 0), 0);
+    const heatedArea = Number.isFinite(house?.area) && house.area > 0 ? house.area : roomsArea;
+    if (!heatedArea) return [];
     const year = stats.filter((month) => month.complete && month.heat !== null).slice(-12);
     if (year.length < 12) return [];
     const total = year.reduce((sum, month) => sum + (month.heat || 0) + (month.dhw || 0), 0);
-    const perArea = total / house.area;
+    const perArea = total / heatedArea;
     const benchmark = THRESHOLDS.benchmark[house.insulation || "average"];
     if (!benchmark || perArea <= benchmark) return [];
     return [finding("benchmark", "info", "Yearly use is above a typical figure for this kind of house",

@@ -21,6 +21,10 @@ test("house profiles keep known fields and round coordinates", () => {
   assert.throws(() => sanitizeHouse({ dayTemp: 40 }), /dayTemp/);
   assert.throws(() => sanitizeHouse({ emitters: "stove" }), /emitters/);
   assert.equal(sanitizeHouse({ roomThermostats: "some" }).roomThermostats, "some");
+  assert.deepEqual(sanitizeHouse({ rooms: [{ name: " Dressing ", area: "6.04", target: "15.2" }, { name: "", area: "", target: "" }] }).rooms, [{ name: "Dressing", area: 6, target: 15 }]);
+  assert.equal(sanitizeHouse({ rooms: [{ name: "", area: "", target: "" }] }).rooms, undefined);
+  assert.throws(() => sanitizeHouse({ rooms: [{ name: "Hall", area: "", target: 20 }] }), /Room 1: area/);
+  assert.throws(() => sanitizeHouse({ rooms: [{ name: "Hall", area: 10, target: 40 }] }), /Room 1: temperature/);
   assert.throws(() => sanitizeHouse({ timeZone: "Mars/Olympus" }), /time zone/);
 });
 
@@ -54,6 +58,22 @@ test("efficiency in demo mode returns findings without touching Daikin", async (
     assert.deepEqual(outbound, []);
   } finally {
     globalThis.fetch = originalFetch;
+    await server.close();
+  }
+});
+
+test("set-aside suggestions are saved and flagged", async () => {
+  const server = await serve({ store: memoryStore(), journalStore: memoryStore(), demoMode: true });
+  try {
+    const put = (setAside) => fetch(`${server.url}/api/settings`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ setAside }) });
+    assert.equal((await put(["deep-setback", "deep-setback"])).status, 200);
+    assert.equal((await put(["<script>"])).status, 400);
+    const settings = await (await fetch(`${server.url}/api/settings`)).json();
+    assert.deepEqual(settings.setAside, ["deep-setback"]);
+    const { findings } = await (await fetch(`${server.url}/api/efficiency`)).json();
+    assert.equal(findings.find((item) => item.id === "deep-setback").setAside, true);
+    assert.equal(findings.find((item) => item.id === "water-too-hot").setAside, undefined);
+  } finally {
     await server.close();
   }
 });
