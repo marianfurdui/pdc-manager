@@ -5,6 +5,10 @@ const publicUrl = process.env.PUBLIC_URL || "https://hp.operagrid.net";
 const redisUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
 const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
 
+if (!process.env.APP_PASSWORD) {
+  throw new Error("APP_PASSWORD is required for the hosted dashboard");
+}
+
 const handlerPromise = createRequestHandler({
   store: new RedisSecureStore({
     url: redisUrl,
