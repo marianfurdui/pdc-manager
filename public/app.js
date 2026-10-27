@@ -16,6 +16,7 @@ const state = {
   gatewayCheck: null,
   writes: new Map(),
   energyPeriod: "w",
+  efficiency: null,
 };
 const days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 const dayLabels = { monday: "Mon", tuesday: "Tue", wednesday: "Wed", thursday: "Thu", friday: "Fri", saturday: "Sat", sunday: "Sun" };
@@ -71,11 +72,23 @@ async function load(force = false) {
     state.loading = false;
     updateConnectionPill();
     render();
+    loadEfficiency();
   } catch (error) {
     state.loading = false;
     app.innerHTML = `<section class="empty-state"><h1>Can't reach the controller</h1><p>${escapeHtml(error.message)}</p><button class="primary" data-command="reload">Try again</button></section>`;
   } finally {
     refreshButton.classList.remove("busy");
+  }
+}
+
+// Suggestions are built on the server from data it already has, so this
+// never spends ONECTA quota. A failure just leaves the panel out.
+async function loadEfficiency() {
+  try {
+    state.efficiency = await request("/api/efficiency");
+    if (!state.writes.size && !state.scheduleDraft) render();
+  } catch {
+    state.efficiency = null;
   }
 }
 
@@ -418,7 +431,62 @@ function overview(device) {
     <div class="zones">${zoneList.map((zone) => zoneCard(device, zone)).join("") || `<article class="panel empty-card"><h2>No zones reported</h2><p>Daikin returned the device without heating or hot-water controls.</p></article>`}</div>
     ${readings.length ? `<dl class="readings">${readings.map((entry) => `<div><dt>${escapeHtml(readableLeaf(entry.characteristic, entry.leaf))}</dt><dd>${escapeHtml(displayValue(entry.leaf))}</dd></div>`).join("")}</dl>` : ""}
     ${energyPanel(device)}
+    ${efficiencyPanel()}
   </section>`;
+}
+
+/* ---------- Efficiency suggestions ---------- */
+
+const ROUTE_NAMES = { controls: "Open controls", schedule: "Open schedule" };
+const SETTING_NAMES = { roomTemperature: "room target", domesticHotWaterTemperature: "tank target", leavingWaterOffset: "water offset", onOffMode: "power", operationMode: "mode", powerfulMode: "boost" };
+
+function changeText(change) {
+  const last = String(change.setting || "").split("/").filter(Boolean);
+  const name = SETTING_NAMES[last.at(-1)] || (last[0] === "schedule" ? "schedule" : sentenceCase(last.at(-1) || "setting").toLowerCase());
+  const value = (item) => (typeof item === "number" ? `${formatNumber(item)}` : typeof item === "object" && item ? (item.enabled === false ? "paused" : "on") : sentenceCase(item ?? "—").toLowerCase());
+  const date = new Date(change.t).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  return `${date}: ${sentenceCase(change.point === "domesticHotWaterTank" ? "hot water" : "heating")} ${name}${change.from !== undefined ? ` ${value(change.from)} to` : ""} ${value(change.to)}`;
+}
+
+function degreeDayChart(stats) {
+  const months = stats.filter((month) => month.kwhPerHdd !== null).slice(-12);
+  if (months.length < 2) return "";
+  const max = Math.max(...months.map((month) => month.kwhPerHdd)) * 1.1;
+  const slot = 100 / months.length;
+  const bars = months.map((month, index) => {
+    const height = (month.kwhPerHdd / max) * 100;
+    return `<rect class="bar-now" x="${(index * slot + slot * 0.25).toFixed(2)}%" width="${(slot * 0.5).toFixed(2)}%" y="${(100 - height).toFixed(2)}%" height="${height.toFixed(2)}%" rx="3"/>`;
+  }).join("");
+  // Heating months skip summer, so the year is shown wherever it changes.
+  const label = (month, index) => new Date(`${month.month}-15T12:00:00Z`).toLocaleDateString(undefined, index === 0 || month.month.endsWith("-01") ? { month: "short", year: "numeric" } : { month: "short" });
+  const ticks = months.map((month, index) => `<text x="${((index + 0.5) * slot).toFixed(2)}%" y="14" text-anchor="middle">${escapeHtml(label(month, index))}</text>`).join("");
+  const latest = months.at(-1);
+  return `<div class="hdd-chart">
+    <p><strong>${escapeHtml(formatNumber(latest.kwhPerHdd, 0.01))} kWh</strong> of heating electricity per degree-day in ${escapeHtml(new Date(`${latest.month}-15T12:00:00Z`).toLocaleDateString(undefined, { month: "long" }))}. Lower is better. This evens out mild and cold months, so compare it before and after each change.</p>
+    <svg class="energy-chart short" role="img" aria-label="${escapeHtml(months.map((month, index) => `${label(month, index)} ${formatNumber(month.kwhPerHdd, 0.01)}`).join(", "))}">${bars}</svg>
+    <svg class="energy-ticks" aria-hidden="true">${ticks}</svg>
+  </div>`;
+}
+
+function efficiencyPanel() {
+  const data = state.efficiency;
+  if (!data) return "";
+  const { findings = [], stats = [], changes = [] } = data;
+  const count = findings.filter((item) => item.severity !== "info").length;
+  const summary = findings.length
+    ? `${count ? `${count} change${count === 1 ? "" : "s"} worth trying` : "Nothing urgent"}, based on the current settings${data.samples ? ` and ${data.samples} readings` : ""}. Try one at a time and give each a week.`
+    : "Nothing to change right now. The settings Daikin reports look efficient.";
+  return `<article class="panel efficiency">
+    <header class="panel-head"><div><h2>Ways to use less energy</h2><p>${escapeHtml(summary)}</p></div></header>
+    ${data.profileComplete ? "" : `<p class="profile-hint">Add your home's details in <a href="#system">System</a> so suggestions match your house and weather.</p>`}
+    ${findings.length ? `<ul class="findings">${findings.map((item) => `<li class="finding is-${escapeHtml(item.severity)}">
+      <div><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.evidence)}</p><p>${escapeHtml(item.suggestion)}</p>${item.estimate ? `<span class="estimate">Estimate: ${escapeHtml(item.estimate)}</span>` : ""}</div>
+      ${item.control ? `<a class="secondary" href="#${escapeHtml(item.control)}">${escapeHtml(ROUTE_NAMES[item.control] || "Open")}</a>` : ""}
+    </li>`).join("")}</ul>` : ""}
+    ${degreeDayChart(stats)}
+    ${data.weather?.error ? `<p class="muted">Weather history is unavailable: ${escapeHtml(data.weather.error)}</p>` : ""}
+    ${changes.length ? `<details class="change-log"><summary>Recent changes <span>${changes.length}</span></summary><ul>${changes.slice().reverse().slice(0, 10).map((change) => `<li>${escapeHtml(changeText(change))}</li>`).join("")}</ul></details>` : ""}
+  </article>`;
 }
 
 /* ---------- Energy ---------- */
@@ -844,9 +912,46 @@ function system(device) {
         <form id="cloud-settings" class="settings-form"><label><span>Client ID</span><input name="clientId" value="${escapeHtml(cloud.clientId || "")}" autocomplete="off"></label><label><span>Client secret</span><input type="password" name="clientSecret" placeholder="${cloud.hasClientSecret ? "Saved. Leave blank to keep it." : "Required"}" autocomplete="new-password"></label><label><span>Redirect URI to register with Daikin</span><input readonly value="${escapeHtml(cloud.redirectUri || "")}"></label><button class="primary">Save credentials</button></form>
       </details>
     </div>
+    ${houseForm(settings.house || {})}
     ${gatewayCard}
     ${cloud.connected ? `<details class="drawer danger-zone"><summary>Disconnect Daikin account</summary><div><p>Removes the saved Daikin sign-in from this dashboard. The heat pump stays in your Daikin account, and Daikin keeps the session active until it expires.</p><button class="danger" data-command="cloud-disconnect">Disconnect</button></div></details>` : ""}
   </section>`;
+}
+
+const HOUSE_OPTIONS = {
+  emitters: [["underfloor", "Underfloor heating"], ["radiators", "Radiators"], ["mixed", "Underfloor and radiators"], ["fancoil", "Fan coils"]],
+  tariff: [["flat", "Same price all day"], ["dual", "Cheaper at night"], ["dynamic", "Hourly market price"]],
+  solar: [["none", "No solar"], ["pv", "Solar panels"], ["pvBattery", "Solar panels and battery"]],
+  insulation: [["poor", "Little or none"], ["average", "Average"], ["renovated", "Renovated, insulated"], ["new", "New build, well insulated"]],
+  roomThermostats: [["none", "No room thermostats"], ["some", "In some rooms"], ["all", "In every room"]],
+};
+const HOUSE_DEFAULTS = { emitters: "underfloor", tariff: "flat", solar: "none", insulation: "average", roomThermostats: "all" };
+
+function houseForm(house) {
+  const field = (name, label, attributes) => `<label><span>${label}</span><input name="${name}" type="number" value="${escapeHtml(house[name] ?? "")}" ${attributes}></label>`;
+  const select = (name, label) => `<label><span>${label}</span><select name="${name}">${HOUSE_OPTIONS[name].map(([value, text]) => `<option value="${value}" ${(house[name] || HOUSE_DEFAULTS[name]) === value ? "selected" : ""}>${text}</option>`).join("")}</select></label>`;
+  const located = Number.isFinite(house.latitude) && Number.isFinite(house.longitude);
+  return `<details class="panel credentials" ${Object.keys(house).length ? "" : "open"}><summary><div><h2>Your home</h2><p>Used to tailor energy suggestions. Only the rounded location (about 10 km) leaves this app, to fetch past outdoor temperatures.</p></div><span class="chip">${Object.keys(house).length ? "Edit" : "Add details"}</span></summary>
+    <form id="house-settings" class="settings-form house-form">
+      <fieldset class="location"><legend>Location</legend>
+        <div class="location-row">${field("latitude", "Latitude", 'step="any" min="-90" max="90" inputmode="decimal"')}${field("longitude", "Longitude", 'step="any" min="-180" max="180" inputmode="decimal"')}<button type="button" class="secondary" data-command="house-locate">Use this device's location</button></div>
+        <p class="muted">${located ? `Saved as ${escapeHtml(house.latitude)}, ${escapeHtml(house.longitude)}${house.timeZone ? `, ${escapeHtml(house.timeZone)}` : ""}.` : "Rounded to one decimal before saving."}</p>
+      </fieldset>
+      <div class="form-grid">
+        ${field("area", "Heated floor area (m²)", 'min="10" max="2000" step="1"')}
+        ${field("occupants", "People living there", 'min="1" max="20" step="1"')}
+        ${field("dayTemp", "Comfortable room temperature (°C)", 'min="15" max="25" step="0.5"')}
+        ${field("nightTemp", "Night room temperature (°C)", 'min="12" max="25" step="0.5"')}
+        ${field("showersPerDay", "Showers or baths per day", 'min="0" max="30" step="1"')}
+        ${select("insulation", "Insulation")}
+        ${select("emitters", "Heats rooms with")}
+        ${select("tariff", "Electricity price")}
+        ${select("solar", "Solar")}
+        ${select("roomThermostats", "Floor thermostats in rooms")}
+      </div>
+      <button class="primary">Save home details</button>
+    </form>
+  </details>`;
 }
 
 /* ---------- Render and events ---------- */
@@ -988,6 +1093,16 @@ app.addEventListener("submit", async (event) => {
     }
     return;
   }
+  if (form.matches("#house-settings")) {
+    const house = Object.fromEntries(new FormData(form));
+    house.timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    await withPending(form.querySelector("button:not([type])"), async () => {
+      await request("/api/settings", { method: "PUT", body: JSON.stringify({ house }) });
+      toast("Home details saved");
+      await load();
+    });
+    return;
+  }
   if (!form.matches("#cloud-settings")) return;
   const button = form.querySelector("button");
   const data = new FormData(form);
@@ -1024,6 +1139,16 @@ app.addEventListener("click", async (event) => {
     if (Number.isFinite(entry.leaf.min)) next = Math.max(entry.leaf.min, next);
     if (Number.isFinite(entry.leaf.max)) next = Math.min(entry.leaf.max, next);
     return queueWrite(device, entry, next, WRITE_DELAY);
+  }
+  if (command === "house-locate") {
+    if (!navigator.geolocation) return toast("This browser can't share its location. Enter it by hand.", true);
+    navigator.geolocation.getCurrentPosition((position) => {
+      const form = button.closest("form");
+      // Rounded here too, so precise coordinates never leave the browser.
+      form.elements.latitude.value = (Math.round(position.coords.latitude * 10) / 10).toFixed(1);
+      form.elements.longitude.value = (Math.round(position.coords.longitude * 10) / 10).toFixed(1);
+    }, () => toast("Location wasn't shared. Enter it by hand.", true), { maximumAge: 3_600_000, timeout: 15_000 });
+    return;
   }
   if (command === "energy-period") {
     state.energyPeriod = button.dataset.period;

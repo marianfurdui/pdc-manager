@@ -28,11 +28,18 @@ Read these files before changing the project:
   private LAN settings and transient OAuth/cache data were excluded.
 - ONECTA OAuth is connected, encrypted tokens are stored, and authenticated
   API calls succeed.
-- The PWA now has a capability-driven heat-pump UI: semantic overview cards,
-  grouped comfort controls, a visual weekly-programme editor for recognized
-  schedule shapes, responsive Mac/iPhone layouts, and a dedicated
+- The PWA has a capability-driven heat-pump UI: per-zone dials with debounced,
+  optimistic writes on Home, switches/segments/steppers under Controls,
+  temperature-coloured weekly timelines with a copy-to-days editor, an energy
+  chart when consumption data is reported, dark mode, and a dedicated
   connected-but-waiting state while no gateway is returned. System also has a
   read-only Wi-Fi gateway reachability check using the existing safe LAN probe.
+- An energy review is prepared for when the device appears: home profile,
+  read-only efficiency rules, an encrypted history journal (separate store
+  key), Open-Meteo degree-days from the rounded location, and
+  `scripts/efficiency-audit.mjs`. Procedure and reasoning are in
+  `docs/EFFICIENCY_PLAYBOOK.md`. Owner context: underfloor heating, flat
+  tariff, no solar, so the goal is fewer kWh, not time-shifting.
 - `GET /v1/gateway-devices` currently returns an empty array with no API error.
 - ONECTA onboarding reports `ALREADY_REGISTERED_TO_OTHER`. Daikin support has
   been asked to release the stale gateway ownership. This is the immediate
@@ -73,14 +80,19 @@ redacted payload before adding model-specific assumptions.
 
 ## Known follow-up work
 
-1. Verify device discovery after account release/onboarding.
-2. Inspect and safely map the real device's management points, actions,
-   schedules, enum values, ranges, and units. Preserve the generic fallback;
-   add model-specific labels only from a redacted real payload.
+1. Verify device discovery after Daikin releases the gateway and it is
+   onboarded.
+2. Map the real device's management points, actions, schedules, enum values,
+   ranges and units from a redacted payload. Preserve the generic fallback;
+   add model-specific labels only from that redacted real payload.
 3. Sign in to the hosted UI with the application password, then verify the
    migrated ONECTA connection and device refresh.
-4. Implement and test Daikin access/refresh-token revocation for
-   **Disconnect cloud**. It currently removes only locally stored tokens.
-5. Continue optional A71 protocol research only as documented in
+4. Make **Disconnect cloud** revoke tokens at Daikin. `disconnect()` currently
+   only deletes the locally stored tokens; treat that as a documented gap until
+   it is fixed and tested.
+5. Continue optional A71 protocol research only as scoped in
    `RESEARCH_STATUS.md`.
+6. Run the energy review in `docs/EFFICIENCY_PLAYBOOK.md` once the device
+   appears. Suggestions stay proposals: change one setting at a time, only
+   with the owner's approval.
 

@@ -8,7 +8,7 @@
     "start": "node src/local-server.js",
     "dev": "DEMO_MODE=true node --watch src/local-server.js",
     "test": "node --test",
-    "check": "node --check src/local-server.js && node --check src/app-handler.js && node --check src/lib/redis-store.js && node --check api/index.js && node --check public/app.js"
+    "check": "node --check src/local-server.js && node --check src/app-handler.js && node --check src/lib/redis-store.js && node --check api/index.js && node --check public/app.js && node --check scripts/efficiency-audit.mjs"
   },
   "engines": {
     "node": "22.x"

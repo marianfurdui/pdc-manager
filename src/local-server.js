@@ -18,6 +18,7 @@ if (host !== "127.0.0.1" && host !== "localhost" && !appPassword) {
 
 const handler = await createRequestHandler({
   store: new SecureStore(dataDirectory, process.env.APP_SECRET),
+  journalStore: new SecureStore(dataDirectory, process.env.APP_SECRET, "journal.enc.json"),
   host,
   port,
   demoMode,

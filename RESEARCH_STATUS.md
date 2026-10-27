@@ -190,6 +190,7 @@ firmware analysis.
 | Capability discovery | Implemented | UI exposes only capabilities reported by the selected connector/device |
 | Schedule handling | Implemented where advertised | Local A61/A62 schedules; ONECTA activation/selection and visual editing for recognized weekly programmes when the API advertises writes |
 | Secure settings storage | Implemented | AES-256-GCM encrypted settings/tokens and a protected generated master key |
+| Energy review | Implemented, awaiting device | Home profile, efficiency rules, encrypted history journal, Open-Meteo degree-days, day-one audit script; see `docs/EFFICIENCY_PLAYBOOK.md` |
 | LAN safety | Implemented | Probe targets are restricted to private/link-local IPv4 addresses or `.local` hosts |
 | Remote self-hosted access | Supported | Use HTTPS through a reverse proxy or private VPN; never forward the adapter itself |
 
@@ -205,7 +206,10 @@ Relevant files:
 - `src/connectors/onecta.js` — official ONECTA OAuth/API connector;
 - `src/app-handler.js` — HTTP API, connector orchestration, settings, and validation;
 - `src/local-server.js` — Mac-only long-running server wrapper;
-- `public/app.js` — device, control, schedule, and system UI;
+- `public/app.js` — device, control, schedule, efficiency, and system UI;
+- `src/lib/efficiency.js`, `src/lib/journal.js`, `src/lib/degree-days.js` —
+  energy rules, history journal, and weather normalisation;
+- `scripts/efficiency-audit.mjs` — day-one read-only energy review;
 - `scripts/research-a71.mjs` — read-only HTTP/UDP A71 research probe;
 - `test/local-altherma.test.js` and `test/onecta.test.js` — connector tests.
 
@@ -271,6 +275,10 @@ so redact those fields before sharing it.
    migrated ONECTA status and device refresh.
 6. Add server-side ONECTA access/refresh-token revocation to **Disconnect
    cloud**.
+7. Run the energy review in `docs/EFFICIENCY_PLAYBOOK.md`: fill in
+   **System → Your home**, run `node scripts/efficiency-audit.mjs`, confirm
+   the ONECTA consumption-array alignment, collect installer-menu photos,
+   and write the personalised recommendations.
 
 ### Optional BRP069A71 local-protocol research
 

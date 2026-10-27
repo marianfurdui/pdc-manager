@@ -230,6 +230,38 @@ label > span { display: block; margin-bottom: 6px; color: var(--muted); font-siz
 .key-prev { background: var(--soft); box-shadow: inset 0 0 0 1px var(--rule); }
 .legend em { margin-left: auto; font-style: normal; }
 
+/* ---------- Efficiency suggestions ---------- */
+.profile-hint { margin-top: 14px; padding: 12px 14px; border-radius: var(--control-radius); background: var(--soft); font-size: 14px; }
+.profile-hint a { color: inherit; font-weight: 600; }
+.findings { display: grid; margin: 14px 0 0; padding: 0; list-style: none; }
+.finding { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 16px 0 16px 18px; border-top: 1px solid var(--rule); position: relative; }
+.finding::before { position: absolute; top: 23px; left: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); content: ""; }
+.finding.is-warn::before { background: var(--danger); }
+.finding.is-suggest::before { background: var(--ink); }
+.finding > div { display: grid; gap: 4px; max-width: 68ch; }
+.finding strong { font-size: 15px; font-weight: 600; }
+.finding p { color: var(--muted); font-size: 14px; }
+.finding p + p { color: var(--ink); }
+.finding .secondary { flex: none; min-height: 38px; font-size: 13px; }
+.estimate { justify-self: start; margin-top: 4px; padding: 3px 10px; border-radius: 99px; background: var(--soft); font-size: 13px; font-weight: 550; }
+.hdd-chart { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--rule); }
+.hdd-chart p { max-width: 68ch; color: var(--muted); font-size: 14px; }
+.hdd-chart p strong { color: var(--ink); }
+.energy-chart.short { height: 100px; }
+.change-log { margin-top: 16px; font-size: 14px; }
+.change-log summary { color: var(--muted); font-weight: 550; cursor: pointer; }
+.change-log summary span { font-variant-numeric: tabular-nums; }
+.change-log ul { margin: 10px 0 0; padding-left: 18px; color: var(--muted); }
+.change-log li { padding: 2px 0; }
+
+/* ---------- Your home ---------- */
+.house-form fieldset { margin: 0; padding: 0; border: 0; }
+.house-form legend { margin-bottom: 8px; font-weight: 600; }
+.location-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 10px; align-items: end; }
+.house-form .muted { margin-top: 6px; }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+.house-form > .primary { justify-self: start; }
+
 /* ---------- Waiting ---------- */
 .waiting { max-width: 640px; }
 .steps { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
@@ -309,4 +341,7 @@ label > span { display: block; margin-bottom: 6px; color: var(--muted); font-siz
   .editor-footer { margin: 0 -18px -18px; padding: 14px 18px; }
   .week-row { grid-template-columns: 36px minmax(0, 1fr) auto; gap: 8px; }
   .legend em { margin-left: 0; width: 100%; }
+  .finding { flex-direction: column; gap: 10px; }
+  .location-row { grid-template-columns: 1fr 1fr; }
+  .location-row .secondary { grid-column: 1 / -1; }
 }

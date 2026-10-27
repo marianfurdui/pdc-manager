@@ -3,16 +3,62 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { LocalAlthermaConnector } from "./connectors/local-altherma.js";
-import { OnectaConnector } from "./connectors/onecta.js";
-import { demoCloudDevice } from "./demo.js";
+import { normalizeCloudDevices, OnectaConnector } from "./connectors/onecta.js";
+import { demoCloudDevice, demoJournal } from "./demo.js";
+import { ensureWeather, roundCoordinate } from "./lib/degree-days.js";
+import { evaluate, INSTALLER_CHECKLIST } from "./lib/efficiency.js";
 import { publicError, AppError } from "./lib/errors.js";
 import { readJson, sendJson } from "./lib/http.js";
+import { normalizeJournal, recordChange, recordSnapshot } from "./lib/journal.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const publicDirectory = path.join(root, "public");
 
+const HOUSE_CHOICES = {
+  emitters: ["underfloor", "radiators", "mixed", "fancoil"],
+  tariff: ["flat", "dual", "dynamic"],
+  solar: ["none", "pv", "pvBattery"],
+  insulation: ["poor", "average", "renovated", "new"],
+  roomThermostats: ["none", "some", "all"],
+};
+const HOUSE_RANGES = {
+  area: [10, 2000],
+  occupants: [1, 20],
+  dayTemp: [15, 25],
+  nightTemp: [12, 25],
+  showersPerDay: [0, 30],
+  latitude: [-90, 90],
+  longitude: [-180, 180],
+};
+
+// Only known fields with sane values are stored; anything else is dropped.
+export function sanitizeHouse(input = {}) {
+  const house = {};
+  for (const [key, [min, max]] of Object.entries(HOUSE_RANGES)) {
+    if (input[key] === "" || input[key] === null || input[key] === undefined) continue;
+    const value = Number(input[key]);
+    if (!Number.isFinite(value) || value < min || value > max) throw new AppError(`${key} must be between ${min} and ${max}`, 400, "INVALID_HOUSE");
+    house[key] = key === "latitude" || key === "longitude" ? roundCoordinate(value) : Math.round(value * 10) / 10;
+  }
+  for (const [key, choices] of Object.entries(HOUSE_CHOICES)) {
+    if (!input[key]) continue;
+    if (!choices.includes(input[key])) throw new AppError(`Unknown ${key}`, 400, "INVALID_HOUSE");
+    house[key] = input[key];
+  }
+  if (input.timeZone) {
+    try {
+      new Intl.DateTimeFormat("en", { timeZone: String(input.timeZone) });
+      house.timeZone = String(input.timeZone);
+    } catch {
+      throw new AppError("Unknown time zone", 400, "INVALID_HOUSE");
+    }
+  }
+  return house;
+}
+
 export async function createRequestHandler({
   store,
+  journalStore = null,
   host = "127.0.0.1",
   port = 8787,
   demoMode = false,
@@ -23,8 +69,22 @@ export async function createRequestHandler({
 } = {}) {
   if (!store) throw new TypeError("A settings store is required");
   await store.init();
+  if (journalStore) await journalStore.init();
   const local = new LocalAlthermaConnector();
-  const cloud = new OnectaConnector(() => store.read(), (settings) => store.write(settings));
+
+  async function updateJournal(change) {
+    if (!journalStore) return null;
+    const journal = normalizeJournal(await journalStore.read());
+    if ((await change(journal)) !== false) await journalStore.write(journal);
+    return journal;
+  }
+
+  const cloud = new OnectaConnector(() => store.read(), (settings) => store.write(settings), {
+    onFreshDevices: async (raw) => {
+      const timeZone = (await store.read()).house?.timeZone;
+      await updateJournal((journal) => recordSnapshot(journal, normalizeCloudDevices(raw), { timeZone }));
+    },
+  });
 
   function isAuthorized(request) {
     // OAuth callbacks must remain reachable after the identity provider
@@ -67,6 +127,7 @@ export async function createRequestHandler({
         note: settings.local?.note || "",
         checkedAt: settings.local?.checkedAt || "",
       } : {},
+      house: settings.house || {},
       onecta: {
         clientId: settings.onecta?.clientId || "",
         hasClientSecret: Boolean(settings.onecta?.clientSecret),
@@ -95,6 +156,7 @@ export async function createRequestHandler({
       settings.onecta ||= {};
       if (body.clientId !== undefined) settings.onecta.clientId = String(body.clientId).trim();
       if (body.clientSecret) settings.onecta.clientSecret = String(body.clientSecret);
+      if (body.house !== undefined) settings.house = sanitizeHouse(body.house);
       await store.write(settings);
       return sendJson(response, 200, await settingsSummary(request));
     }
@@ -158,7 +220,13 @@ export async function createRequestHandler({
         const settings = await store.read();
         return sendJson(response, 200, await local.write(settings.local?.host, body.action, body.value));
       }
-      if (body.source === "cloud") return sendJson(response, 200, await cloud.write(body));
+      if (body.source === "cloud") {
+        const result = await cloud.write(body);
+        await updateJournal((journal) => recordChange(journal, {
+          point: body.pointId, setting: `${body.characteristic}${body.path || ""}`, from: result.previous, to: body.value,
+        })).catch(() => {});
+        return sendJson(response, 200, { ok: true });
+      }
       throw new AppError("Unknown connector source", 400, "INVALID_SOURCE");
     }
     if (request.method === "PUT" && url.pathname === "/api/schedule") {
@@ -169,8 +237,48 @@ export async function createRequestHandler({
         const settings = await store.read();
         return sendJson(response, 200, await local.writeSchedule(settings.local?.host, body.kind, body.schedule));
       }
-      if (body.source === "cloud") return sendJson(response, 200, await cloud.writeSchedule(body));
+      if (body.source === "cloud") {
+        const result = await cloud.writeSchedule(body);
+        await updateJournal((journal) => recordChange(journal, {
+          point: body.pointId, setting: `schedule/${body.mode || "any"}/${body.section}`, to: body.section === "current" ? body.value : "programme edited",
+        })).catch(() => {});
+        return sendJson(response, 200, result);
+      }
       throw new AppError("Unknown connector source", 400, "INVALID_SOURCE");
+    }
+    if (request.method === "GET" && url.pathname === "/api/efficiency") {
+      const settings = await store.read();
+      const house = settings.house || {};
+      let devices = [];
+      let journal = normalizeJournal(null);
+      let weatherError = "";
+      if (demoMode) {
+        devices = [demoCloudDevice];
+        journal = demoJournal();
+      } else {
+        // Built only from data already fetched: no ONECTA request is made.
+        if (settings.onecta?.tokens) devices = (await cloud.cachedSnapshot()) || [];
+        if (journalStore) {
+          journal = normalizeJournal(await journalStore.read());
+          if (Number.isFinite(house.latitude) && Number.isFinite(house.longitude)) {
+            try {
+              if (await ensureWeather(journal, house)) await journalStore.write(journal);
+            } catch (error) {
+              weatherError = error instanceof AppError ? error.message : "Weather history is unavailable right now";
+            }
+          }
+        }
+      }
+      const result = evaluate({ devices, house, journal });
+      return sendJson(response, 200, {
+        ...result,
+        stats: result.stats.slice(-24),
+        changes: journal.changes.slice(-20),
+        samples: journal.samples.length,
+        weather: { available: Boolean(journal.weather && Object.keys(journal.weather.daily || {}).length), error: weatherError },
+        profileComplete: ["latitude", "longitude", "area", "occupants", "dayTemp"].every((key) => Number.isFinite(house[key])),
+        installerChecklist: INSTALLER_CHECKLIST,
+      });
     }
     throw new AppError("API route not found", 404, "NOT_FOUND");
   }

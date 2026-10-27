@@ -3,9 +3,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 export class SecureStore {
-  constructor(directory, environmentSecret) {
+  constructor(directory, environmentSecret, fileName = "settings.enc.json") {
     this.directory = directory;
-    this.file = path.join(directory, "settings.enc.json");
+    this.file = path.join(directory, fileName);
     this.keyFile = path.join(directory, ".master-key");
     this.environmentSecret = environmentSecret;
     this.key = null;

@@ -15,6 +15,13 @@ const handlerPromise = createRequestHandler({
     token: redisToken,
     secret: process.env.APP_SECRET,
   }),
+  // History lives under its own key so the settings document stays small.
+  journalStore: new RedisSecureStore({
+    url: redisUrl,
+    token: redisToken,
+    secret: process.env.APP_SECRET,
+    key: "pdc-control:journal",
+  }),
   host: "vercel",
   appPassword: process.env.APP_PASSWORD || "",
   publicUrl,

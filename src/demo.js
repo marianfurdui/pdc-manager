@@ -1,3 +1,5 @@
+import { localDate, mergeConsumption, normalizeJournal } from "./lib/journal.js";
+
 const leaf = (path, value, options = {}) => ({ path, value, settable: false, ...options });
 // Shaped like ONECTA consumptionData: d = 2-hour buckets for yesterday then
 // today, w = days of last week then this week, m = months of last year then
@@ -78,3 +80,24 @@ export const demoCloudDevice = {
     },
   ],
 };
+
+// Synthetic history for demo mode: two years of seasonal weather, the demo
+// device's consumption arrays, and a few days of heating readings with the
+// water a little hotter than underfloor heating needs.
+export function demoJournal(now = new Date()) {
+  const journal = mergeConsumption(normalizeJournal(null), [demoCloudDevice], localDate(now));
+  journal.weather = { key: "demo", daily: {}, fetchedOn: localDate(now) };
+  const start = new Date(Date.UTC(now.getUTCFullYear() - 2, now.getUTCMonth(), 1));
+  for (let day = new Date(start); day < now; day.setUTCDate(day.getUTCDate() + 1)) {
+    const dayOfYear = Math.floor((day - Date.UTC(day.getUTCFullYear(), 0, 0)) / 86_400_000);
+    journal.weather.daily[day.toISOString().slice(0, 10)] = Math.round((10 - 12 * Math.cos((2 * Math.PI * (dayOfYear - 15)) / 365) + ((dayOfYear * 7) % 5) - 2) * 10) / 10;
+  }
+  for (let hour = 72; hour > 0; hour -= 2) {
+    journal.samples.push({
+      t: new Date(now.getTime() - hour * 3_600_000).toISOString(),
+      o: 5 + (hour % 6) - 3, lw: 34 + (hour % 4) / 2, r: 21.6, rt: 21.5, tk: 48, tt: 50, m: "heating", cs: "heating", ts: "idle", cp: true, tp: true,
+    });
+  }
+  journal.changes.push({ t: new Date(now.getTime() - 5 * 86_400_000).toISOString(), point: "domesticHotWaterTank", setting: "temperatureControl/setpoints/domesticHotWaterTemperature", from: 55, to: 50 });
+  return journal;
+}

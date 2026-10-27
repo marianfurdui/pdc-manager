@@ -100,9 +100,10 @@ export function validateWritableValue(target, value) {
 }
 
 export class OnectaConnector {
-  constructor(loadSettings, saveSettings) {
+  constructor(loadSettings, saveSettings, { onFreshDevices } = {}) {
     this.loadSettings = loadSettings;
     this.saveSettings = saveSettings;
+    this.onFreshDevices = onFreshDevices;
     this.cache = null;
     this.rateLimit = {};
   }
@@ -238,10 +239,20 @@ export class OnectaConnector {
     settings.onecta ||= {};
     settings.onecta.deviceCache = this.cache;
     await this.saveSettings(settings);
+    // History is recorded only from fetches that already happened, so it
+    // never spends extra ONECTA quota. A failure must not break the read.
+    if (this.onFreshDevices) await this.onFreshDevices(value).catch(() => {});
     return value;
   }
 
   async snapshot(force = false) { return normalizeCloudDevices(await this.devices(force)); }
+
+  // The last fetched devices, even if older than the cache lifetime, without
+  // contacting Daikin. Returns null when nothing has been fetched yet.
+  async cachedSnapshot() {
+    const cached = this.cache?.value ?? (await this.loadSettings()).onecta?.deviceCache?.value;
+    return cached ? normalizeCloudDevices(cached) : null;
+  }
 
   async write({ deviceId, pointId, characteristic, path = "", value }) {
     if (!Number.isFinite(value) && typeof value === "number") throw new AppError("Value must be finite", 400, "INVALID_VALUE");
@@ -255,7 +266,7 @@ export class OnectaConnector {
     const body = path ? { value, path } : { value };
     await this.api(url, { method: "PATCH", body: JSON.stringify(body) });
     await this.clearDeviceCache();
-    return { ok: true };
+    return { ok: true, previous: target.value };
   }
 
   async writeSchedule({ deviceId, pointId, mode = "any", section, value }) {
