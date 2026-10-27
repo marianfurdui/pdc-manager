@@ -1,0 +1,9 @@
+{
+  "name": "Altherma Control",
+  "short_name": "Altherma",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f2f0e9",
+  "theme_color": "#101c1a",
+  "icons": [{ "src": "/mark.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

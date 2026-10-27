@@ -1,0 +1,14 @@
+services:
+  altherma-control:
+    build: .
+    restart: unless-stopped
+    environment:
+      APP_PASSWORD: "change-this-before-lan-or-remote-access"
+      PUBLIC_URL: ""
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - altherma-data:/data
+
+volumes:
+  altherma-data:

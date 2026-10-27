@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/index.js": {
+      "includeFiles": "public/**",
+      "maxDuration": 60
+    }
+  },
+  "rewrites": [
+    { "source": "/oauth/callback", "destination": "/api/index?__kind=oauth" },
+    { "source": "/api/:path*", "destination": "/api/index?__kind=api&__path=:path*" },
+    { "source": "/:path*", "destination": "/api/index?__kind=static&__path=:path*" }
+  ]
+}

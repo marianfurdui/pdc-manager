@@ -1,0 +1,16 @@
+{
+  "name": "altherma-control",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Capability-driven Daikin Altherma dashboard with ONECTA cloud and optional local access",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "DEMO_MODE=true node --watch src/server.js",
+    "test": "node --test",
+    "check": "node --check src/server.js && node --check src/app-handler.js && node --check src/lib/redis-store.js && node --check api/index.js && node --check public/app.js"
+  },
+  "engines": {
+    "node": "22.x"
+  }
+}
