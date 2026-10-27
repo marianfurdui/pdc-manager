@@ -7,9 +7,9 @@
       "maxDuration": 60
     }
   },
-  "rewrites": [
-    { "source": "/oauth/callback", "destination": "/api/index?__kind=oauth" },
-    { "source": "/api/:path*", "destination": "/api/index?__kind=api&__path=:path*" },
-    { "source": "/:path*", "destination": "/api/index?__kind=static&__path=:path*" }
+  "routes": [
+    { "src": "/oauth/callback", "dest": "/api/index?__kind=oauth" },
+    { "src": "/api/(.*)", "dest": "/api/index?__kind=api&__path=$1" },
+    { "src": "/(.*)", "dest": "/api/index?__kind=static&__path=$1" }
   ]
 }
