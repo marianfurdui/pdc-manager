@@ -962,6 +962,7 @@ function houseForm(house) {
         ${field("floors", "Heated floors", 'min="1" max="5" step="1"')}
         ${field("basementArea", "Heated floor area over the basement (m²)", 'min="0" max="1000" step="1"')}
         ${field("slabInsulation", "Insulation under the heated floor (cm)", 'min="0" max="50" step="1"')}
+        ${field("basementTemp", "Basement temperature in winter (°C)", 'min="0" max="25" step="0.5" placeholder="Unknown"')}
         ${select("ventilation", "Fresh air comes from")}
       </div>
       <fieldset class="rooms"><legend>Rooms</legend>

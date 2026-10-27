@@ -22,7 +22,8 @@ one at a time, with a measurement period after each change.
 | Windows | Double glazing, 6 mm panes, low-e with argon fill, wood frames, about 6 years old (c. 2020) | Owner; Ug ≈ 1.1 and Uw ≈ 1.2–1.3 W/m²K estimated |
 | Altitude | 482 m | Owner; entered in the home profile so weather data is corrected for it |
 | Ceilings | 2.6 m throughout, no double-height rooms | Owner; no height corrections needed |
-| Heated area | About 160 m² over two floors | Owner; ground floor over the basement assumed about 80 m² |
+| Levels | Unheated basement 80 m² (about half below ground), heated ground floor 80 m², heated top floor under the roof 80 m² | Owner |
+| Heated area | 160 m² over two floors | Owner; 80 m² of it directly over the basement |
 | Below the heated floor | Unheated basement without floor heating, 5 cm insulation under the heated slab | Owner; floor U ≈ 0.5–0.6 W/m²K estimated |
 | Ventilation | Opening windows only | Owner |
 | Room thermostats | A floor thermostat in every room | Owner; setpoints and whether they drive manifold actuators to be confirmed |
@@ -61,12 +62,15 @@ modern, which these are) and the floor over the unheated basement are probably w
 of the remaining heat goes.
 
 The floor is the clearest building improvement. Floor heating keeps the
-screed at about 28 °C, and only 5 cm of insulation separates it from a
-basement at roughly 10–12 °C. That is about 9–10 W per m² of heated floor
+screed at about 28 °C, and only 5 cm of insulation separates it from the
+basement. The basement is about half below ground, so the soil keeps it
+milder in winter, likely 12–15 °C rather than 10–11 °C. A thermometer
+reading in January, entered in **Your home**, replaces the assumed 11 °C. That is about 9–10 W per m² of heated floor
 lost downwards. Only the ground floor sits over the basement (the upper
-floor's downward heat goes into heated rooms), so with about 80 m² that is
-roughly 0.75 kW continuously through the heating season, around 900 kWh of
-electricity a year at a seasonal COP of 4. Insulating the basement ceiling from below
+floor's downward heat goes into heated rooms), so with 80 m² that is
+roughly 0.65–0.8 kW continuously through the heating season (warmer
+basement at the low end), around 800–900 kWh of electricity a year at a
+seasonal COP of 4. Insulating the basement ceiling from below
 with 10 cm or more of mineral wool or EPS would cut that by about two
 thirds; it is usually simple to install because the ceiling is
 accessible. These are estimates from typical conductivities; the measured
@@ -89,8 +93,11 @@ set aside in the dashboard ("Not now") and brought back later.
 The windows are recent and replacing them would not pay back; at most,
 check seals and adjust the hinges if any draught is felt.
 
-Still unknown: the exact ground-floor area over the basement (enter it in
-**Your home**).
+The top floor sits directly under the 25 cm roof insulation. Its rooms also
+gain some heat through the floor from the ground floor below, so they may
+need less flow than the ground-floor rooms when balancing.
+
+In **Your home**, enter 2 heated floors and 80 m² over the basement.
 
 On a flat tariff with no solar, **when** electricity is used costs nothing
 extra. The only lever is **how much** is used, which means raising the

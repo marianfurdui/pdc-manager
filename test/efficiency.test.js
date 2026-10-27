@@ -209,7 +209,9 @@ test("thin insulation over an unheated basement is flagged", () => {
   assert.equal(ids(evaluate({ devices: [device()], house: { belowFloor: "basement" }, journal: emptyJournal(), now: winter })).includes("floor-loss"), false);
   // 80 m² at U ≈ 0.55 and a 17 °C difference loses about 0.75 kW.
   const sized = evaluate({ devices: [device()], house: { belowFloor: "basement", slabInsulation: 5, basementArea: 80 }, journal: emptyJournal(), now: winter }).findings.find((finding) => finding.id === "floor-loss");
-  assert.match(sized.evidence, /80 m² that is roughly 0\.8 kW/);
+  assert.match(sized.evidence, /80 m², with the basement at an assumed 11°C, that is roughly 0\.8 kW/);
+  const warmer = evaluate({ devices: [device()], house: { belowFloor: "basement", slabInsulation: 5, basementArea: 80, basementTemp: 14 }, journal: emptyJournal(), now: winter }).findings.find((finding) => finding.id === "floor-loss");
+  assert.match(warmer.evidence, /basement at 14°C, that is roughly 0\.6 kW/);
   assert.match(sized.estimate, /^about \d+ kWh of electricity a year with 10 cm added$/);
 });
 

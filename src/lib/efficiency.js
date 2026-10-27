@@ -324,14 +324,16 @@ const rules = [
   function floorLoss({ house, emitters }) {
     if (house?.belowFloor !== "basement" || !Number.isFinite(house?.slabInsulation) || !["underfloor", "mixed"].includes(emitters)) return [];
     if (house.slabInsulation >= THRESHOLDS.slabInsulationMin) return [];
-    const { screed, basement, conductivity, otherResistance, seasonDays, cop } = THRESHOLDS.floorLoss;
+    const { screed, conductivity, otherResistance, seasonDays, cop } = THRESHOLDS.floorLoss;
+    const measured = Number.isFinite(house.basementTemp);
+    const basement = measured ? house.basementTemp : THRESHOLDS.floorLoss.basement;
     const uValue = (cm) => 1 / (otherResistance + cm / 100 / conductivity);
     const area = Number.isFinite(house.basementArea) && house.basementArea > 0 ? house.basementArea : null;
     const watts = area ? area * uValue(house.slabInsulation) * (screed - basement) : null;
     const saved = area ? watts - area * uValue(house.slabInsulation + 10) * (screed - basement) : null;
     const seasonKwh = (power) => (power * 24 * seasonDays) / 1000 / cop;
     return [finding("floor-loss", "suggest", "Floor heating loses heat into the unheated basement",
-      `The heated floor sits over an unheated basement with ${fmt(house.slabInsulation, 0)} cm of insulation between them${area ? `. Over ${fmt(area, 0)} m² that is roughly ${fmt(watts / 1000, 1)} kW lost downwards through the heating season` : ""}.`,
+      `The heated floor sits over an unheated basement with ${fmt(house.slabInsulation, 0)} cm of insulation between them${area ? `. Over ${fmt(area, 0)} m², with the basement at ${measured ? "" : "an assumed "}${fmt(basement)}°C, that is roughly ${fmt(watts / 1000, 1)} kW lost downwards through the heating season` : ""}.`,
       "Underfloor pipes heat downwards as well as up. Insulating the basement ceiling (10 cm or more of mineral wool or EPS) is usually one of the cheapest permanent savings for this layout.",
       area ? { estimate: `about ${Math.round(seasonKwh(saved) / 50) * 50} kWh of electricity a year with 10 cm added` } : {})];
   },

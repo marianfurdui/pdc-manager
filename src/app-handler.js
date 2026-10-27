@@ -33,6 +33,7 @@ const HOUSE_RANGES = {
   floors: [1, 5],
   elevation: [-100, 3000],
   basementArea: [0, 1000],
+  basementTemp: [0, 25],
   latitude: [-90, 90],
   longitude: [-180, 180],
 };
