@@ -9,6 +9,7 @@ const A71_READ_ONLY_PATHS = [
   "/config/adapter/info",
   "/config/adapter/product_info",
   "/config/firmware/info",
+  "/config/wlan/info",
   "/config/wlan/networks",
   "/",
   "/common/basic_info",
@@ -230,6 +231,8 @@ export function summarizeA71Response(path, status, contentType, body) {
     keepScalar("deviceType", "device_type");
   } else if (path === "/config/firmware/info") {
     keepScalar("version", "version");
+  } else if (path === "/config/wlan/info") {
+    keepScalar("status", "status");
   }
   return {
     path,

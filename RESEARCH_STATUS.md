@@ -138,7 +138,7 @@ The HTTP server returns a small plain-text `404 ... not_found` response for:
 - legacy `/aircon/get_model_info`, `/aircon/get_sensor_info`, and
   `/aircon/get_control_info` endpoints;
 - the Altherma `/mca` endpoint used by BRP069A61/A62 adapters;
-- `/dsiot/multireq`;
+- `GET /dsiot/multireq`;
 - a curated group of read-only paths under `/api`, `/gateway`, `/system`,
   `/device`, `/wifi`, `/network`, `/status`, and `/version`.
 
@@ -150,17 +150,42 @@ and RUN was continuously lit:
 - `GET /config/adapter/info`;
 - `GET /config/adapter/product_info`;
 - `GET /config/firmware/info`;
+- `GET /config/wlan/info`;
 - `GET /config/wlan/networks`.
 
 The responses confirm the A71 model, EU/heating product class, firmware
 `4.2.2`, WLAN metadata, `connected` adapter state, and a non-empty cloud
 identity. The application exposes only allowlisted non-identifying fields and
 suppresses IDs, MAC, IP, serial, SSIDs, and response bodies.
+The System result orders the four verified adapter, product, firmware, and
+WLAN information routes first and gives them user-facing labels.
 
 The same client bundle identifies state-changing setup routes for WLAN scan,
 WLAN settings, firmware upload, and cloud connection. None was invoked. No
 local route providing heat-pump temperatures, operating state, schedules, or
 control was found.
+
+The bundle's generic DX diagnostics also contain a `POST /dsiot/multireq`
+request with twelve `op: 2` retrieval operations for adapter, device, energy,
+demand, schedule, and status resources. After explicit owner approval, the
+exact retrieval-only request was sent to the A71. It returned the same plain
+HTTP 404 behavior and no JSON response. No speculative variants were sent.
+
+### Firmware inspection
+
+The ONECTA package contains the A71 `DKUNWL3G` firmware image matching version
+`4.2.2`. The application treats it as an opaque byte asset and uploads it
+unchanged during a firmware update. Offline inspection found no executable,
+archive, filesystem, boot-image header, or readable route table. Entropy is
+uniformly near the maximum across the complete image, it is incompressible,
+and its size is aligned to 16-byte blocks. This is consistent with encrypted
+or otherwise opaque firmware, so paths cannot be recovered from the image
+without its vendor packaging/cryptographic format.
+
+Other firmware assets in the package expose legacy route strings, confirming
+that the same inspection would recover plaintext routes when present. Those
+legacy strings belong to different adapter generations and returned 404 on
+the installed A71.
 
 ### UDP behavior
 

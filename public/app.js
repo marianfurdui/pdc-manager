@@ -948,11 +948,28 @@ function a71InspectionResult(result) {
     deviceType: "Product type",
     version: "Firmware",
   };
+  const verifiedRoutes = {
+    "/config/adapter/info": "Adapter connection",
+    "/config/adapter/product_info": "Product information",
+    "/config/firmware/info": "Firmware information",
+    "/config/wlan/info": "Wi-Fi connection",
+  };
+  const routeOrder = Object.keys(verifiedRoutes);
+  const orderedFindings = [...findings].sort((a, b) => {
+    const aIndex = routeOrder.indexOf(a.path);
+    const bIndex = routeOrder.indexOf(b.path);
+    return (aIndex < 0 ? routeOrder.length : aIndex) - (bIndex < 0 ? routeOrder.length : bIndex);
+  });
   return `<div class="inspection-result"><p><strong>Adapter answered.</strong> ${escapeHtml(result.responses)} of ${escapeHtml(result.pathsChecked)} read-only routes responded; ${escapeHtml(findings.length)} returned useful or distinct results.</p>
     ${cloudIdentityPresent ? `<div class="notice"><strong>Cloud identity is still stored.</strong> The adapter is connected to Daikin Cloud and still identifies an existing gateway registration. This matches the stale-account ownership error.</div>` : ""}
-    ${findings.length ? `<dl class="facts">${findings.map((item) => {
-      const details = Object.entries(item.details || {}).map(([key, value]) => `${labels[key] || key}: ${typeof value === "boolean" ? (value ? "yes" : "no") : value}`).join(" · ");
-      return `<div><dt>${escapeHtml(item.path)}</dt><dd>${escapeHtml(item.status)}${details ? ` · ${escapeHtml(details)}` : ""}${item.keys?.length ? ` · fields: ${escapeHtml(item.keys.join(", "))}` : ""}</dd></div>`;
+    ${findings.length ? `<dl class="facts">${orderedFindings.map((item) => {
+      const details = Object.entries(item.details || {}).map(([key, value]) => {
+        const label = key === "status" && item.path === "/config/wlan/info" ? "Wi-Fi connection" : labels[key] || key;
+        return `${label}: ${typeof value === "boolean" ? (value ? "yes" : "no") : value}`;
+      }).join(" · ");
+      const routeLabel = verifiedRoutes[item.path];
+      const title = routeLabel ? `${routeLabel} — ${item.path}` : item.path;
+      return `<div><dt>${escapeHtml(title)}</dt><dd>${escapeHtml(item.status)}${details ? ` · ${escapeHtml(details)}` : ""}${item.keys?.length ? ` · fields: ${escapeHtml(item.keys.join(", "))}` : ""}</dd></div>`;
     }).join("")}</dl>` : `<p class="muted">Every responding path returned the same embedded-server response. No readable setup or ownership interface was exposed.</p>`}
     <p class="muted">${escapeHtml(result.safety)}</p></div>`;
 }

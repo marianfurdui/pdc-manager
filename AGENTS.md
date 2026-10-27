@@ -52,6 +52,14 @@ Read these files before changing the project:
 - Static inspection of the current ONECTA Android bundle identified the exact
   A71 routes. The local System page now reads the safe GET routes while AP is
   off and RUN is solid. IDs, MAC, IP, serial, and SSID values stay suppressed.
+- The verified A71 GET set now includes `/config/wlan/info`; it exposes WLAN
+  status but no heat-pump telemetry. With explicit owner approval, ONECTA's
+  exact `POST /dsiot/multireq` diagnostic body containing only `op: 2`
+  retrievals was tested once and returned HTTP 404 with no JSON response.
+- The packaged A71 4.2.2 firmware is uniformly high-entropy, incompressible,
+  16-byte aligned, and has no readable routes or known executable/archive/
+  filesystem header. Treat it as encrypted or otherwise opaque; the app
+  uploads it unchanged.
 - The adapter reports `connected` and has a non-empty cloud identity. The app's
   onboarding code determines “registered to other” by comparing that identity
   with the authorized account's gateway list. No local cloud-ownership removal

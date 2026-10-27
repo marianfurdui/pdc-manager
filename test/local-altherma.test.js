@@ -76,3 +76,15 @@ test("A71 setup summaries expose only allowlisted non-identifying values", () =>
   assert.equal(serialized.includes("001122334455"), false);
   assert.equal(serialized.includes("192.168.1.42"), false);
 });
+
+test("A71 WLAN summary keeps status but suppresses address and error values", () => {
+  const summary = summarizeA71Response("/config/wlan/info", 200, "application/json", JSON.stringify({
+    ip: "192.0.2.42",
+    status: "connected",
+    error: "private diagnostic detail",
+  }));
+  assert.deepEqual(summary.details, { status: "connected" });
+  const serialized = JSON.stringify(summary);
+  assert.equal(serialized.includes("192.0.2.42"), false);
+  assert.equal(serialized.includes("private diagnostic detail"), false);
+});
