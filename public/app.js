@@ -9,16 +9,26 @@ const state = {
   errors: [],
   rateLimit: {},
   loading: true,
+  loadedAt: 0,
   selectedId: null,
   pending: false,
   scheduleDraft: null,
   gatewayCheck: null,
+  writes: new Map(),
+  energyPeriod: "w",
 };
 const days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 const dayLabels = { monday: "Mon", tuesday: "Tue", wednesday: "Wed", thursday: "Thu", friday: "Fri", saturday: "Sat", sunday: "Sun" };
+const weekdays = days.slice(0, 5);
+// Stepper presses are collected into one write so a few taps cost a single
+// ONECTA request against the 20/minute and 200/day quota.
+const WRITE_DELAY = 1200;
+const STALE_AFTER = 5 * 60 * 1000;
 
 const escapeHtml = (value) => String(value ?? "—").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
 const titleCase = (value) => String(value || "").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[-_/]/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+const sentenceCase = (value) => { const text = titleCase(value).toLowerCase(); return text.charAt(0).toUpperCase() + text.slice(1); };
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const activeDevice = () => state.devices.find((device) => device.id === state.selectedId) || state.devices[0];
 const unbox = (value) => {
   if (!value || typeof value !== "object" || Array.isArray(value) || !Object.hasOwn(value, "value")) return value;
@@ -39,9 +49,10 @@ async function request(url, options = {}) {
 function toast(message, error = false) {
   const node = document.createElement("div");
   node.className = `toast${error ? " error" : ""}`;
+  node.setAttribute("role", error ? "alert" : "status");
   node.textContent = message;
   toastRegion.append(node);
-  setTimeout(() => node.remove(), 4200);
+  setTimeout(() => node.remove(), error ? 6500 : 4200);
 }
 
 async function load(force = false) {
@@ -55,13 +66,14 @@ async function load(force = false) {
     state.devices = result.devices || [];
     state.errors = result.errors || [];
     state.rateLimit = result.rateLimit || settings.onecta?.rateLimit || {};
+    state.loadedAt = Date.now();
     if (!state.devices.some((device) => device.id === state.selectedId)) state.selectedId = state.devices[0]?.id || null;
     state.loading = false;
     updateConnectionPill();
     render();
   } catch (error) {
     state.loading = false;
-    app.innerHTML = `<section class="empty-state"><div class="empty-icon">!</div><h1>Controller unavailable</h1><p>${escapeHtml(error.message)}</p><button class="primary" data-command="reload">Try again</button></section>`;
+    app.innerHTML = `<section class="empty-state"><h1>Can't reach the controller</h1><p>${escapeHtml(error.message)}</p><button class="primary" data-command="reload">Try again</button></section>`;
   } finally {
     refreshButton.classList.remove("busy");
   }
@@ -71,7 +83,7 @@ function updateConnectionPill() {
   const online = state.devices.some((device) => device.online);
   const connected = Boolean(state.settings?.onecta?.connected);
   pill.className = `connection-pill${online ? " online" : connected ? " ready" : ""}`;
-  pill.innerHTML = `<i></i>${online ? "Heat pump online" : connected ? "ONECTA connected" : "Connect ONECTA"}`;
+  pill.innerHTML = `<i></i>${online ? "Heat pump online" : connected ? "Waiting for heat pump" : "Not connected"}`;
 }
 
 function currentRoute() {
@@ -80,267 +92,593 @@ function currentRoute() {
 }
 
 function notices() {
-  return state.errors.map((error) => `<div class="notice error"><strong>Could not refresh ${escapeHtml(titleCase(error.source))}.</strong> ${escapeHtml(error.message)}</div>`).join("");
+  return state.errors.map((error) => `<div class="notice error"><strong>${escapeHtml(error.source === "cloud" ? "Daikin cloud" : "Home network")} didn't respond.</strong> ${escapeHtml(error.message)}</div>`).join("");
 }
 
 function devicePicker(device) {
-  if (state.devices.length < 2) return `<span class="source-badge ${device.source}">${device.source === "cloud" ? "Remote" : "Local"}</span>`;
+  if (state.devices.length < 2) return "";
   return `<label class="device-picker"><span>Heat pump</span><select data-device-picker>${state.devices.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === device.id ? "selected" : ""}>${escapeHtml(item.name || item.model || "Daikin")}</option>`).join("")}</select></label>`;
 }
 
-function deviceHeader(device, eyebrow, title, subtitle = "") {
-  return `<div class="page-head"><div><p class="eyebrow">${escapeHtml(eyebrow)}</p><h1>${escapeHtml(title)}</h1><p class="subhead">${escapeHtml(subtitle || device.model || "Daikin heat pump")}</p></div>${devicePicker(device)}</div>`;
+function pageHead(title, subtitle, device) {
+  return `<header class="page-head"><div><h1>${escapeHtml(title)}</h1>${subtitle ? `<p class="subhead">${escapeHtml(subtitle)}</p>` : ""}</div>${device ? devicePicker(device) : ""}</header>`;
 }
 
-function waitingForGateway() {
-  const connected = Boolean(state.settings?.onecta?.connected);
-  if (!connected) return `<section>${notices()}<div class="page-head"><div><p class="eyebrow">Welcome home</p><h1>Your heat pump, beautifully simple.</h1><p class="subhead">Connect your Daikin account once. This dashboard will then adapt to every feature your Altherma exposes.</p></div></div>
-    <div class="grid two-col welcome-grid">
-      <article class="card dark connect-card"><div><span class="live-tag">Secure connection</span><h2>Connect ONECTA</h2><p>Use the Daikin account that will own the heat pump.</p></div><button class="primary lime-button" data-route-to="system">Set up connection</button></article>
-      <article class="card promise-card"><span class="card-icon">⌁</span><h2>One calm control surface</h2><p>Temperatures, modes, hot water and schedules appear automatically after connection.</p></article>
-    </div></section>`;
+/* ---------- Values, labels and colour ---------- */
 
-  return `<section>${notices()}<div class="page-head"><div><p class="eyebrow">Connection ready</p><h1>Waiting for your heat pump.</h1><p class="subhead">Your Daikin account is connected. The dashboard will populate as soon as the gateway is released and added to this account.</p></div><span class="source-badge cloud">ONECTA connected</span></div>
-    <article class="card waiting-card">
-      <div class="waiting-orbit"><span></span></div>
-      <div><p class="eyebrow">Current status</p><h2>Gateway not visible yet</h2><p>No setup is needed here. After Daikin releases the old ownership, add the unit to ONECTA and refresh this page.</p>
-        <div class="status-steps"><span class="done">✓ App connected</span><span class="active">2 Gateway release pending</span><span>3 Heat pump appears here</span></div>
-        <div class="button-row"><button class="primary" data-command="reload">Check again</button><button class="secondary" data-route-to="system">Connection details</button></div>
-      </div>
-    </article></section>`;
+function formatNumber(value, step) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return String(value ?? "—");
+  const decimals = step ? (String(step).split(".")[1]?.length || 0) : Number.isInteger(number) ? 0 : 1;
+  return number.toFixed(decimals);
 }
 
-function flattenDevice(device) {
-  return (device.points || []).flatMap((point) => (point.characteristics || []).flatMap((characteristic) =>
-    (characteristic.leaves || []).map((leaf) => ({
-      device,
-      point,
-      characteristic,
-      leaf,
-      key: `${point.type || ""} ${point.name || ""} ${characteristic.name || ""} ${leaf.path || ""}`.toLowerCase(),
-    }))));
+function withUnit(text, unit) {
+  if (!unit) return text;
+  return unit === "°C" ? `${text}°` : `${text} ${unit}`;
 }
 
-function findReading(device, patterns, predicate = () => true) {
-  const entries = flattenDevice(device);
-  for (const pattern of patterns) {
-    const found = entries.find((entry) => pattern.test(entry.key) && predicate(entry.leaf.value, entry));
-    if (found) return found;
-  }
-  return null;
-}
-
-function pointEntries(point) {
-  return (point.characteristics || []).flatMap((characteristic) =>
-    (characteristic.leaves || []).map((leaf) => ({ point, characteristic, leaf, key: `${characteristic.name || ""} ${leaf.path || ""}`.toLowerCase() })));
-}
-
-function formatValue(value, unit = "") {
+function displayValue(leaf, value = leaf.value) {
   if (value === undefined || value === null || value === "") return "—";
   if (typeof value === "boolean") return value ? "On" : "Off";
+  if (typeof value === "number") {
+    const signed = /offset/i.test(leaf.path || "") && value > 0 ? "+" : "";
+    return withUnit(`${signed}${formatNumber(value, leaf.step)}`, leaf.unit);
+  }
   if (Array.isArray(value)) return value.map(String).join(", ");
   if (typeof value === "object") return "Available";
-  return `${escapeHtml(value)}${unit ? ` <span>${escapeHtml(unit)}</span>` : ""}`;
+  return sentenceCase(value);
 }
 
-function plainValue(value) {
-  if (value === undefined || value === null || value === "") return "—";
-  if (typeof value === "boolean") return value ? "On" : "Off";
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
+// Temperature is the one thing colour means in this interface: blue for cool,
+// green-teal for mild, amber to red for warm and hot.
+const THERMAL = [[0, [61, 120, 181]], [0.36, [94, 158, 142]], [0.7, [224, 145, 47]], [1, [204, 79, 44]]];
+const SCALES = { room: [15, 25], water: [25, 60], offset: [-6, 6] };
+
+function thermal(value, kind) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "#9aa7ad";
+  const [low, high] = SCALES[kind || (number > 30 ? "water" : "room")];
+  const t = clamp((number - low) / (high - low), 0, 1);
+  const index = THERMAL.findIndex(([stop]) => stop >= t);
+  const [stopB, colorB] = THERMAL[Math.max(index, 1)];
+  const [stopA, colorA] = THERMAL[Math.max(index, 1) - 1];
+  const mix = (t - stopA) / (stopB - stopA || 1);
+  return `rgb(${colorA.map((channel, i) => Math.round(channel + (colorB[i] - channel) * mix)).join(",")})`;
 }
 
-function semanticStatus(device) {
-  const operation = findReading(device, [/operationstate/, /operationmode/]);
-  const power = findReading(device, [/onoffmode/]);
-  const raw = String(operation?.leaf.value || power?.leaf.value || (device.online ? "Ready" : "Unavailable"));
-  return titleCase(raw);
-}
-
-function metric(label, entry, note, style = "") {
-  return `<article class="card metric-card ${style}"><div class="metric-label"><span>${escapeHtml(label)}</span><span class="metric-dot"></span></div><div class="metric-value">${formatValue(entry?.leaf.value, entry?.leaf.unit)}</div><p class="metric-note">${escapeHtml(note)}</p></article>`;
+function scaleFor(entry) {
+  if (/offset/.test(entry.key)) return "offset";
+  if (/domestichotwater|tank|leavingwater/.test(entry.key)) return "water";
+  return "room";
 }
 
 function pointTitle(point) {
   const type = String(point.type || point.name || "");
   if (/domesticHotWater/i.test(type)) return "Hot water";
-  if (/climateControl/i.test(type)) return point.name && point.name !== point.type ? point.name : "Indoor climate";
+  if (/climateControl/i.test(type)) return point.name && point.name !== point.type ? point.name : "Heating";
   if (/indoorUnit/i.test(type)) return "Indoor unit";
   if (/outdoorUnit/i.test(type)) return "Outdoor unit";
+  if (/gateway/i.test(type)) return "Wi-Fi adapter";
   return point.name || titleCase(type);
+}
+
+const LEAF_NAMES = {
+  onOffMode: "Power",
+  operationMode: "Mode",
+  powerfulMode: "Boost",
+  roomTemperature: "Room",
+  outdoorTemperature: "Outside",
+  leavingWaterTemperature: "Leaving water",
+  tankTemperature: "Tank",
+  domesticHotWaterTemperature: "Tank",
+  leavingWaterOffset: "Water offset",
+};
+const SETPOINT_NAMES = {
+  roomTemperature: "Room target",
+  domesticHotWaterTemperature: "Tank target",
+  leavingWaterTemperature: "Water target",
+  leavingWaterOffset: "Water offset",
+};
+
+function readableLeaf(characteristic, leaf) {
+  const segments = String(leaf.path || "").split("/").filter(Boolean);
+  const last = segments.at(-1) || characteristic.name;
+  const isSetpoint = segments.includes("setpoints") || (leaf.settable && typeof leaf.value === "number");
+  const base = (isSetpoint && SETPOINT_NAMES[last]) || LEAF_NAMES[last] || titleCase(last);
+  const modeIndex = segments.indexOf("operationModes");
+  const mode = modeIndex >= 0 ? segments[modeIndex + 1] : "";
+  return mode ? `${modeLabel(mode)} ${base.toLowerCase()}` : base;
+}
+
+function modeLabel(value) {
+  const names = { heating: "Heat", cooling: "Cool", auto: "Auto", fanOnly: "Fan", dry: "Dry", on: "On", off: "Off" };
+  return names[value] || sentenceCase(value);
+}
+
+/* ---------- Device model ---------- */
+
+function pointEntries(point) {
+  return (point.characteristics || []).flatMap((characteristic) =>
+    (characteristic.leaves || []).map((leaf) => ({ point, characteristic, leaf, key: `${point.type || ""} ${characteristic.name || ""} ${leaf.path || ""}`.toLowerCase() })));
+}
+
+function flattenDevice(device) {
+  return (device.points || []).flatMap(pointEntries);
+}
+
+const keyOf = (device, entry) => [device.id, entry.point.id, entry.characteristic.name, entry.leaf.path || ""].join("|");
+const shownValue = (device, entry) => { const write = state.writes.get(keyOf(device, entry)); return write ? write.value : entry.leaf.value; };
+const isOnOff = (leaf) => typeof leaf.value === "boolean" || (Array.isArray(leaf.values) && leaf.values.length === 2 && leaf.values.includes("on") && leaf.values.includes("off"));
+const isOn = (value) => value === true || value === "on";
+const flipped = (leaf, value) => (typeof leaf.value === "boolean" ? !isOn(value) : isOn(value) ? "off" : "on");
+
+function entryByKey(key) {
+  for (const device of state.devices) {
+    const entry = flattenDevice(device).find((item) => keyOf(device, item) === key);
+    if (entry) return { device, entry };
+  }
+  return null;
+}
+
+function pickSetpoint(entries, mode) {
+  const candidates = entries.filter((entry) => entry.leaf.settable && typeof entry.leaf.value === "number");
+  const forMode = candidates.filter((entry) => !/\/operationmodes\//.test(entry.key) || (mode && entry.key.includes(`/operationmodes/${mode.toLowerCase()}/`)));
+  const pool = forMode.length ? forMode : candidates;
+  for (const name of ["roomtemperature", "domestichotwatertemperature", "leavingwatertemperature", "leavingwateroffset"]) {
+    const found = pool.find((entry) => entry.key.endsWith(name));
+    if (found) return found;
+  }
+  return pool[0] || null;
+}
+
+function zoneModel(device, point) {
+  const entries = pointEntries(point);
+  const named = (name) => entries.find((entry) => entry.characteristic.name === name && !entry.leaf.path);
+  const mode = named("operationMode");
+  const isTank = /domestichotwater/i.test(point.type || "");
+  const readingFor = (patterns) => {
+    for (const pattern of patterns) {
+      const found = entries.find((entry) => !entry.leaf.settable && typeof entry.leaf.value === "number" && pattern.test(entry.key));
+      if (found) return found;
+    }
+    return null;
+  };
+  const boost = entries.find((entry) => entry.characteristic.name === "powerfulMode" && entry.leaf.settable && isOnOff(entry.leaf));
+  const power = named("onOffMode");
+  const currentMode = mode ? String(shownValue(device, mode) ?? "") : "";
+  return {
+    point,
+    entries,
+    isTank,
+    power: power?.leaf.settable && isOnOff(power.leaf) ? power : null,
+    powerReading: power,
+    mode: mode?.leaf.settable && Array.isArray(mode.leaf.values) && mode.leaf.values.length > 1 ? mode : null,
+    currentMode,
+    operation: entries.find((entry) => /operationstate/.test(entry.key)),
+    reading: isTank ? readingFor([/tanktemperature/, /domestichotwatertemperature/]) : readingFor([/roomtemperature/, /leavingwatertemperature/]),
+    setpoint: pickSetpoint(entries, currentMode),
+    boost,
+  };
+}
+
+function zones(device) {
+  return (device.points || [])
+    .filter((point) => !/gateway|indoorunit|outdoorunit/i.test(point.type || ""))
+    .map((point) => zoneModel(device, point))
+    .filter((zone) => zone.power || zone.setpoint || zone.reading || zone.point.schedule);
+}
+
+function alerts(device) {
+  const flags = flattenDevice(device).filter((entry) => entry.leaf.value === true && /isinerrorstate|isinemergencystate|isinwarningstate|isincautionstate/.test(entry.key));
+  return flags.map((entry) => {
+    const code = pointEntries(entry.point).find((item) => /errorcode/.test(item.key) && item.leaf.value && item.leaf.value !== "-");
+    const level = /error|emergency/.test(entry.key) ? "an error" : "a warning";
+    return `<div class="notice error" role="alert"><strong>${escapeHtml(pointTitle(entry.point))} reports ${level}${code ? ` (${escapeHtml(code.leaf.value)})` : ""}.</strong> Check the indoor unit display, or contact your installer if it stays on.</div>`;
+  }).join("");
+}
+
+/* ---------- Shared controls ---------- */
+
+function toggleControl(device, entry, label) {
+  const key = keyOf(device, entry);
+  const on = isOn(shownValue(device, entry));
+  return `<button class="toggle${state.writes.has(key) ? " is-pending" : ""}" role="switch" aria-checked="${on}" aria-label="${escapeHtml(label)}" data-command="toggle" data-key="${escapeHtml(key)}" data-focus="${escapeHtml(key)}"></button>`;
+}
+
+function choiceControl(device, entry, label) {
+  const key = keyOf(device, entry);
+  const current = String(shownValue(device, entry));
+  const pending = state.writes.has(key) ? " is-pending" : "";
+  if (entry.leaf.values.length > 4) {
+    return `<select class="${pending}" aria-label="${escapeHtml(label)}" data-choice-key="${escapeHtml(key)}" data-focus="${escapeHtml(key)}">${entry.leaf.values.map((value, index) => `<option value="${index}" ${String(value) === current ? "selected" : ""}>${escapeHtml(modeLabel(value))}</option>`).join("")}</select>`;
+  }
+  return `<div class="segmented${pending}" role="radiogroup" aria-label="${escapeHtml(label)}">${entry.leaf.values.map((value, index) => `<button role="radio" aria-checked="${String(value) === current}" data-command="choose" data-key="${escapeHtml(key)}" data-index="${index}" data-focus="${escapeHtml(`${key}|${index}`)}">${escapeHtml(modeLabel(value))}</button>`).join("")}</div>`;
+}
+
+function stepValue(leaf) {
+  return leaf.step || (leaf.unit === "°C" ? 0.5 : 1);
+}
+
+function stepperButtons(device, entry, value) {
+  const key = keyOf(device, entry);
+  const step = stepValue(entry.leaf);
+  const down = Number(value) - step;
+  const up = Number(value) + step;
+  const atMin = Number.isFinite(entry.leaf.min) && down < entry.leaf.min - 1e-9;
+  const atMax = Number.isFinite(entry.leaf.max) && up > entry.leaf.max + 1e-9;
+  const label = readableLeaf(entry.characteristic, entry.leaf).toLowerCase();
+  return [
+    `<button class="step" data-command="step" data-dir="-1" data-key="${escapeHtml(key)}" data-focus="${escapeHtml(`${key}|down`)}" aria-label="Lower ${escapeHtml(label)} to ${escapeHtml(displayValue(entry.leaf, down))}" ${atMin ? "disabled" : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12"/></svg></button>`,
+    `<button class="step" data-command="step" data-dir="1" data-key="${escapeHtml(key)}" data-focus="${escapeHtml(`${key}|up`)}" aria-label="Raise ${escapeHtml(label)} to ${escapeHtml(displayValue(entry.leaf, up))}" ${atMax ? "disabled" : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button>`,
+  ];
+}
+
+function inlineStepper(device, entry) {
+  const value = shownValue(device, entry);
+  const [down, up] = stepperButtons(device, entry, value);
+  const pending = state.writes.get(keyOf(device, entry));
+  return `<div class="stepper${pending ? " is-pending" : ""}">${down}<output aria-live="polite">${escapeHtml(displayValue(entry.leaf, value))}</output>${up}</div>`;
+}
+
+function writeStatus(device, entry) {
+  const write = state.writes.get(keyOf(device, entry));
+  if (!write) return "";
+  return write.status === "sending" ? "Sending to heat pump…" : "Release to send";
+}
+
+/* ---------- Overview ---------- */
+
+const ARC = "M 40.6 159.4 A 84 84 0 1 1 159.4 159.4";
+
+function arcPoint(fraction) {
+  const angle = ((135 + 270 * fraction) * Math.PI) / 180;
+  return [100 + 84 * Math.cos(angle), 100 + 84 * Math.sin(angle)];
+}
+
+function dial(device, zone, on) {
+  const { setpoint, reading } = zone;
+  const readingName = reading ? readableLeaf(reading.characteristic, reading.leaf) : "";
+  const readingText = reading ? `${readingName} ${displayValue(reading.leaf)}` : "";
+  if (!setpoint) {
+    return `<div class="dial is-readonly"><div class="dial-face"><span class="dial-caption">${escapeHtml(readingName || "Now")}</span><strong class="dial-number">${escapeHtml(reading ? displayValue(reading.leaf) : "—")}</strong><span class="dial-sub">No target advertised</span></div></div>`;
+  }
+  const leaf = setpoint.leaf;
+  const value = Number(shownValue(device, setpoint));
+  const kind = scaleFor(setpoint);
+  const min = Number.isFinite(leaf.min) ? leaf.min : Math.floor(value - 10);
+  const max = Number.isFinite(leaf.max) ? leaf.max : Math.ceil(value + 10);
+  const fraction = clamp((value - min) / (max - min || 1), 0, 1);
+  const readingValue = reading?.leaf.value;
+  const sameScale = reading && kind !== "offset";
+  const marker = sameScale && Number.isFinite(readingValue) ? arcPoint(clamp((readingValue - min) / (max - min || 1), 0, 1)) : null;
+  const [down, up] = stepperButtons(device, setpoint, value);
+  const status = writeStatus(device, setpoint);
+  const caption = !on ? "Off" : status || (zone.isTank ? "Heat tank to" : kind === "offset" ? "Water offset" : `${modeLabel(zone.currentMode || "Target")} to`);
+  return `<div class="dial">
+    <svg viewBox="0 0 200 200" aria-hidden="true">
+      <path class="dial-track" d="${ARC}" pathLength="100"/>
+      <path class="dial-value" d="${ARC}" pathLength="100" stroke="${thermal(value, kind)}" stroke-dasharray="${(fraction * 100).toFixed(2)} 100"/>
+      ${marker ? `<circle class="dial-reading" cx="${marker[0].toFixed(1)}" cy="${marker[1].toFixed(1)}" r="5.5"/>` : ""}
+    </svg>
+    <div class="dial-face">
+      <span class="dial-caption">${escapeHtml(caption)}</span>
+      <strong class="dial-number" aria-live="polite">${escapeHtml(displayValue(leaf, value).replace(/ °C$/, "°"))}</strong>
+      ${readingText ? `<span class="dial-sub">${escapeHtml(readingText)}</span>` : ""}
+    </div>
+    <div class="dial-steps">${down}${up}</div>
+  </div>`;
+}
+
+function zoneStatus(device, zone, on) {
+  if (!on) return "Switched off";
+  const operation = zone.operation?.leaf.value;
+  if (operation) return sentenceCase(operation);
+  return device.online ? "Ready" : "Unavailable";
+}
+
+function zoneCard(device, zone) {
+  const title = pointTitle(zone.point);
+  const on = zone.powerReading ? isOn(shownValue(device, zone.powerReading)) : true;
+  return `<article class="zone${on ? "" : " is-off"}">
+    <header class="zone-head"><div><h2>${escapeHtml(title)}</h2><p>${escapeHtml(zoneStatus(device, zone, on))}</p></div>${zone.power ? toggleControl(device, zone.power, `${title} power`) : ""}</header>
+    ${dial(device, zone, on)}
+    ${zone.mode ? choiceControl(device, zone.mode, `${title} mode`) : ""}
+    ${zone.boost ? `<div class="switch-row"><div><strong>Boost</strong><span>Heat the tank to its target now, once</span></div>${toggleControl(device, zone.boost, "Hot water boost")}</div>` : ""}
+    ${zoneToday(device, zone)}
+  </article>`;
+}
+
+function otherReadings(device, zoneList) {
+  const primary = new Set(zoneList.map((zone) => zone.reading && keyOf(device, zone.reading)));
+  const seen = new Set();
+  return flattenDevice(device)
+    .filter((entry) => !entry.leaf.settable && typeof entry.leaf.value === "number" && (entry.leaf.unit === "°C" || /temperature/.test(entry.key)))
+    .filter((entry) => !primary.has(keyOf(device, entry)))
+    .filter((entry) => {
+      const label = readableLeaf(entry.characteristic, entry.leaf);
+      if (seen.has(label)) return false;
+      seen.add(label);
+      return true;
+    });
 }
 
 function overview(device) {
   if (device.source !== "cloud") return localOverview(device);
-  const room = findReading(device, [/roomtemperature/, /indoortemperature/], (value) => typeof value === "number");
-  const outdoor = findReading(device, [/outdoortemperature/, /outdoor.*temperature/], (value) => typeof value === "number");
-  const leavingWater = findReading(device, [/leavingwatertemperature/, /leavingwater/], (value) => typeof value === "number");
-  const tank = findReading(device, [/tanktemperature/, /domestichotwatertemperature/], (value) => typeof value === "number");
-  const setpoint = findReading(device, [/roomtemperature/, /setpoint/], (value, entry) => typeof value === "number" && entry.leaf.settable);
-  const writable = flattenDevice(device).filter((entry) => entry.leaf.settable).length;
-  const visiblePoints = (device.points || []).filter((point) => !/gateway/i.test(point.type || ""));
-  return `<section>${notices()}${deviceHeader(device, "Live home", device.name || "Altherma", `${device.model || "Daikin Altherma"} · updated ${relativeTime(device.updatedAt)}`)}
-    <div class="grid metric-grid">
-      <article class="card dark hero-status"><div class="status-row"><span class="live-tag">● ${device.online ? "Connected" : "Unavailable"}</span><span>Remote</span></div><div><p class="eyebrow light">System state</p><div class="mode-value">${escapeHtml(semanticStatus(device))}</div><p class="metric-note">${writable} available control${writable === 1 ? "" : "s"}</p></div><div class="heat-line"><span></span></div></article>
-      ${metric("Room", room, setpoint ? `Target ${plainValue(setpoint.leaf.value)}${setpoint.leaf.unit || "°C"}` : "Indoor sensor")}
-      ${metric("Outside", outdoor, "Outdoor sensor")}
-      ${metric("Leaving water", leavingWater, "Heating circuit")}
-      ${metric("Hot water", tank, "Tank temperature", "lime")}
-    </div>
-    <div class="section-title"><h2>Your system</h2><button class="text-button" data-route-to="controls">Open controls →</button></div>
-    <div class="grid point-overview-grid">${visiblePoints.map(pointOverviewCard).join("") || `<article class="card"><h2>System connected</h2><p class="subhead">No user-facing management points were returned.</p></article>`}</div>
+  const zoneList = zones(device);
+  const readings = otherReadings(device, zoneList);
+  const outside = readings.find((entry) => /outdoortemperature/.test(entry.key));
+  const climate = zoneList.find((zone) => !zone.isTank);
+  const summary = [
+    climate ? zoneStatus(device, climate, climate.powerReading ? isOn(shownValue(device, climate.powerReading)) : true) : device.online ? "Online" : "Offline",
+    outside ? `${displayValue(outside.leaf)} outside` : "",
+  ].filter(Boolean).join(", ");
+  return `<section class="page">${pageHead(device.name || "Home", `${summary}. Updated ${relativeTime(device.updatedAt)}.`, device)}
+    ${notices()}${alerts(device)}${device.online ? "" : `<div class="notice">The heat pump is offline in Daikin's cloud. Readings may be out of date and changes may not arrive.</div>`}
+    <div class="zones">${zoneList.map((zone) => zoneCard(device, zone)).join("") || `<article class="panel empty-card"><h2>No zones reported</h2><p>Daikin returned the device without heating or hot-water controls.</p></article>`}</div>
+    ${readings.length ? `<dl class="readings">${readings.map((entry) => `<div><dt>${escapeHtml(readableLeaf(entry.characteristic, entry.leaf))}</dt><dd>${escapeHtml(displayValue(entry.leaf))}</dd></div>`).join("")}</dl>` : ""}
+    ${energyPanel(device)}
   </section>`;
 }
 
-function pointOverviewCard(point) {
-  const entries = pointEntries(point);
-  const stateEntry = entries.find((entry) => /operationstate|onoffmode/.test(entry.key));
-  const temperatures = entries.filter((entry) => typeof entry.leaf.value === "number" && /temperature/.test(entry.key)).slice(0, 2);
-  return `<article class="card point-overview"><div class="point-overview-head"><div><p class="eyebrow">${escapeHtml(titleCase(point.type))}</p><h2>${escapeHtml(pointTitle(point))}</h2></div><span class="state-chip">${escapeHtml(titleCase(stateEntry?.leaf.value || "Ready"))}</span></div>
-    <div class="mini-readings">${temperatures.map((entry) => `<div><span>${escapeHtml(readableLeaf(entry.characteristic, entry.leaf))}</span><strong>${formatValue(entry.leaf.value, entry.leaf.unit)}</strong></div>`).join("") || `<p class="metric-note">Connected and reporting</p>`}</div>
+/* ---------- Energy ---------- */
+
+const PERIODS = {
+  d: { label: "Day", size: 12, current: "Today", previous: "yesterday", ticks: (i) => (i % 3 === 0 ? String(i * 2).padStart(2, "0") : "") },
+  w: { label: "Week", size: 7, current: "This week", previous: "last week", ticks: (i) => dayLabels[days[i]] },
+  m: { label: "Year", size: 12, current: "This year", previous: "last year", ticks: (i) => "JFMAMJJASOND"[i] },
+};
+
+function energySeries(device) {
+  const leaves = flattenDevice(device).filter((entry) => Array.isArray(entry.leaf.value) && /\/electrical\/[^/]+\/[dwm]$/.test(entry.leaf.path || ""));
+  if (!leaves.length) return null;
+  const period = PERIODS[state.energyPeriod];
+  const sum = (offset) => Array.from({ length: period.size }, (_, index) => {
+    const values = leaves
+      .filter((entry) => entry.leaf.path.endsWith(`/${state.energyPeriod}`))
+      .map((entry) => entry.leaf.value[offset + index])
+      .filter((value) => typeof value === "number");
+    return values.length ? values.reduce((total, value) => total + value, 0) : null;
+  });
+  const parts = leaves.filter((entry) => entry.leaf.path.endsWith(`/${state.energyPeriod}`)).map((entry) => {
+    const mode = entry.leaf.path.split("/").at(-2);
+    const name = /domestichotwater/i.test(entry.point.type) ? "Hot water" : mode === "cooling" ? "Cooling" : "Space heating";
+    const total = entry.leaf.value.slice(period.size).filter((value) => typeof value === "number").reduce((a, b) => a + b, 0);
+    return { name, total };
+  }).filter((part) => part.total > 0);
+  return { previous: sum(0), current: sum(period.size), parts, unit: leaves[0].leaf.unit || "kWh", period };
+}
+
+function energyPanel(device) {
+  const series = energySeries(device);
+  if (!series) return "";
+  const { previous, current, period, unit } = series;
+  const total = (values) => values.filter((value) => value !== null).reduce((a, b) => a + b, 0);
+  const max = Math.max(0.1, ...previous.filter((v) => v !== null), ...current.filter((v) => v !== null));
+  const slot = 100 / period.size;
+  const bars = current.map((value, index) => {
+    const x = index * slot;
+    const before = previous[index];
+    return `${before !== null ? `<rect class="bar-prev" x="${(x + slot * 0.14).toFixed(2)}%" width="${(slot * 0.72).toFixed(2)}%" y="${(100 - (before / max) * 100).toFixed(2)}%" height="${((before / max) * 100).toFixed(2)}%" rx="3"/>` : ""}
+      ${value !== null ? `<rect class="bar-now" x="${(x + slot * 0.3).toFixed(2)}%" width="${(slot * 0.4).toFixed(2)}%" y="${(100 - (value / max) * 100).toFixed(2)}%" height="${((value / max) * 100).toFixed(2)}%" rx="3"/>` : ""}`;
+  }).join("");
+  const ticks = current.map((_, index) => `<text x="${((index + 0.5) * slot).toFixed(2)}%" y="14" text-anchor="middle">${escapeHtml(period.ticks(index))}</text>`).join("");
+  const now = total(current);
+  const then = total(previous);
+  return `<article class="panel energy">
+    <header class="panel-head"><div><h2>Electricity used</h2><p>${escapeHtml(period.current)}: <strong>${escapeHtml(formatNumber(now, 0.1))} ${escapeHtml(unit)}</strong>, ${escapeHtml(period.previous)} ${escapeHtml(formatNumber(then, 0.1))} ${escapeHtml(unit)}</p></div>
+      <div class="segmented compact" role="radiogroup" aria-label="Energy period">${Object.entries(PERIODS).map(([id, item]) => `<button role="radio" aria-checked="${id === state.energyPeriod}" data-command="energy-period" data-period="${id}" data-focus="energy-${id}">${item.label}</button>`).join("")}</div>
+    </header>
+    <svg class="energy-chart" role="img" aria-label="${escapeHtml(`${period.current} ${formatNumber(now, 0.1)} ${unit}, ${period.previous} ${formatNumber(then, 0.1)} ${unit}`)}">${bars}</svg>
+    <svg class="energy-ticks" aria-hidden="true">${ticks}</svg>
+    <p class="legend"><span class="key-now"></span>${escapeHtml(period.current)}<span class="key-prev"></span>${escapeHtml(sentenceCase(period.previous))}${series.parts.length > 1 ? ` <em>${series.parts.map((part) => `${escapeHtml(part.name)} ${escapeHtml(formatNumber(part.total, 0.1))} ${escapeHtml(unit)}`).join(", ")}</em>` : ""}</p>
   </article>`;
 }
 
-function localOverview(device) {
-  const space = device.controls?.space || {};
-  const tank = device.controls?.tank || {};
-  return `<section>${deviceHeader(device, "Live home", device.name || "Altherma")}<div class="grid metric-grid">
-    <article class="card dark hero-status"><div class="status-row"><span class="live-tag">● ${device.online ? "Connected" : "Unavailable"}</span></div><div><div class="mode-value">${escapeHtml(space.operationMode || "Ready")}</div></div><div class="heat-line"><span></span></div></article>
-    ${metric("Room", { leaf: { value: space.indoorTemperature, unit: "°C" } }, `Target ${space.targetTemperature ?? "—"}°C`)}
-    ${metric("Outside", { leaf: { value: space.outdoorTemperature, unit: "°C" } }, "Outdoor sensor")}
-    ${metric("Hot water", { leaf: { value: tank.temperature, unit: "°C" } }, `Target ${tank.targetTemperature ?? "—"}°C`, "lime")}
-  </div></section>`;
-}
-
-function readableLeaf(characteristic, leaf) {
-  const segments = String(leaf.path || "").split("/").filter(Boolean);
-  const path = segments.at(-1);
-  const names = {
-    onOffMode: "Power",
-    operationMode: "Operating mode",
-    powerfulMode: "Hot water boost",
-  };
-  const base = names[path || characteristic.name] || titleCase(path || characteristic.name);
-  const modeIndex = segments.indexOf("operationModes");
-  const mode = modeIndex >= 0 ? segments[modeIndex + 1] : "";
-  return mode ? `${titleCase(mode)} ${base.toLowerCase()}` : base;
-}
-
-function controls(device) {
-  if (device.source !== "cloud") return localControls(device);
-  const controllable = (device.points || []).map((point) => ({
-    point,
-    writable: pointEntries(point).filter((entry) => entry.leaf.settable),
-  })).filter((group) => group.writable.length);
-  return `<section>${deviceHeader(device, "Comfort controls", "Make it feel right.", "Only controls supported by this heat pump are shown.")}
-    ${controllable.length ? `<div class="control-stack">${controllable.map(({ point, writable }) => cloudPointControls(device, point, writable)).join("")}</div>` : `<article class="card empty-card"><span class="card-icon">⌁</span><h2>No remote controls advertised</h2><p>The heat pump is online, but ONECTA returned readings only.</p></article>`}
-    ${readingsDrawer(device)}
-  </section>`;
-}
-
-function cloudPointControls(device, point, writable) {
-  const operation = pointEntries(point).find((entry) => /operationstate/.test(entry.key));
-  return `<article class="card control-surface"><div class="control-surface-head"><div><p class="eyebrow">${escapeHtml(titleCase(point.type))}</p><h2>${escapeHtml(pointTitle(point))}</h2><p>${escapeHtml(titleCase(operation?.leaf.value || "Ready"))}</p></div><span class="control-count">${writable.length} control${writable.length === 1 ? "" : "s"}</span></div>
-    <div class="control-grid">${writable.map((entry) => cloudControl(device, entry)).join("")}</div>
-  </article>`;
-}
-
-function cloudData(device, entry) {
-  return `data-cloud-action data-device="${escapeHtml(device.id)}" data-point="${escapeHtml(entry.point.id)}" data-characteristic="${escapeHtml(entry.characteristic.name)}" data-path="${escapeHtml(entry.leaf.path || "")}"`;
-}
-
-function cloudControl(device, entry) {
-  const { characteristic, leaf } = entry;
-  const label = readableLeaf(characteristic, leaf);
-  const data = cloudData(device, entry);
-  if (Array.isArray(leaf.values) && leaf.values.length) {
-    return `<div class="control-field"><label>${escapeHtml(label)}<select ${data}>${leaf.values.map((value) => `<option value="${escapeHtml(value)}" ${String(value) === String(leaf.value) ? "selected" : ""}>${escapeHtml(titleCase(value))}</option>`).join("")}</select></label><button class="small-button apply-button" data-command="cloud-write">Apply</button></div>`;
-  }
-  if (typeof leaf.value === "boolean") {
-    return `<div class="switch-field"><div><strong>${escapeHtml(label)}</strong><span>${leaf.value ? "On" : "Off"}</span></div><button class="toggle ${leaf.value ? "on" : ""}" ${data} data-value="${!leaf.value}" data-command="cloud-write" aria-label="Turn ${escapeHtml(label)} ${leaf.value ? "off" : "on"}"></button></div>`;
-  }
-  if (typeof leaf.value === "number") {
-    const step = leaf.step || (leaf.unit === "°C" ? 0.5 : 1);
-    return `<div class="setpoint-control"><div><strong>${escapeHtml(label)}</strong><span>${leaf.min !== undefined && leaf.max !== undefined ? `${escapeHtml(leaf.min)}–${escapeHtml(leaf.max)} ${escapeHtml(leaf.unit || "")}` : "Setpoint"}</span></div><div class="setpoint-editor"><input type="number" value="${escapeHtml(leaf.value)}" ${leaf.min !== undefined ? `min="${escapeHtml(leaf.min)}"` : ""} ${leaf.max !== undefined ? `max="${escapeHtml(leaf.max)}"` : ""} step="${escapeHtml(step)}" ${data} aria-label="${escapeHtml(label)}"><span>${escapeHtml(leaf.unit || "")}</span><button class="small-button apply-button" data-command="cloud-write">Set</button></div></div>`;
-  }
-  if (typeof leaf.value === "string") {
-    return `<div class="control-field"><label>${escapeHtml(label)}<input value="${escapeHtml(leaf.value)}" ${data}></label><button class="small-button apply-button" data-command="cloud-write">Apply</button></div>`;
-  }
-  return "";
-}
-
-function readingsDrawer(device) {
-  const readOnly = flattenDevice(device).filter((entry) => !entry.leaf.settable && ["string", "number", "boolean"].includes(typeof entry.leaf.value));
-  if (!readOnly.length) return "";
-  return `<details class="readings-drawer"><summary>All live readings <span>${readOnly.length}</span></summary><div class="readings-grid">${readOnly.map((entry) => `<div><span>${escapeHtml(pointTitle(entry.point))} · ${escapeHtml(readableLeaf(entry.characteristic, entry.leaf))}</span><strong>${formatValue(entry.leaf.value, entry.leaf.unit)}</strong></div>`).join("")}</div></details>`;
-}
-
-function localControls(device) {
-  const space = device.controls?.space || {};
-  const tank = device.controls?.tank || {};
-  return `<section>${deviceHeader(device, "Comfort controls", "Make it feel right.")}
-    <div class="grid two-col"><article class="card control-surface"><h2>Space heating</h2>${localNumberControl("Room target", "space.targetTemperature", space.targetTemperature, 0.5)}${localNumberControl("Weather curve offset", "space.leavingWaterOffset", space.leavingWaterOffset, 1)}</article>
-    <article class="card control-surface"><h2>Hot water</h2>${localNumberControl("Tank target", "tank.targetTemperature", tank.targetTemperature, 1)}</article></div></section>`;
-}
-
-function localNumberControl(label, action, value, step) {
-  return `<div class="setpoint-control"><div><strong>${escapeHtml(label)}</strong><span>Setpoint</span></div><div class="setpoint-editor"><button class="step-button" data-action="${escapeHtml(action)}" data-value="${Number(value) - step}">−</button><output>${escapeHtml(value)}°</output><button class="step-button" data-action="${escapeHtml(action)}" data-value="${Number(value) + step}">+</button></div></div>`;
-}
-
-function schedule(device) {
-  if (device.source !== "cloud") return localSchedule(device);
-  const points = (device.points || []).filter((point) => point.schedule);
-  return `<section>${deviceHeader(device, "Weekly rhythm", "Schedules", "Choose when your home should be comfortable.")}
-    ${points.length ? `<div class="schedule-stack">${points.map((point) => cloudScheduleCard(device, point)).join("")}</div>` : `<article class="card empty-card"><span class="card-icon">□</span><h2>No cloud schedule available</h2><p>This heat pump did not advertise schedules through ONECTA.</p></article>`}
-  </section>`;
-}
+/* ---------- Schedules ---------- */
 
 function scheduleModes(schedule) {
   const value = unbox(schedule?.value) || {};
   return unbox(value.modes) || {};
 }
 
-function cloudScheduleCard(device, point) {
-  const scheduleData = point.schedule;
-  const modes = scheduleModes(scheduleData);
-  return `<article class="card schedule-card"><div class="schedule-card-head"><div><p class="eyebrow">${escapeHtml(titleCase(point.type))}</p><h2>${escapeHtml(pointTitle(point))}</h2></div><span class="state-chip">${scheduleData.settable ? "Editable" : "Read only"}</span></div>
-    ${Object.entries(modes).map(([mode, data]) => scheduleMode(device, point, mode, unbox(data) || {}, scheduleData.settable)).join("") || `<p class="subhead">No schedule modes were returned.</p>`}
-  </article>`;
-}
-
-function scheduleMode(device, point, mode, data, settable) {
+function modeSchedule(point, mode, data) {
   const currentNode = data.currentSchedule || {};
   const current = String(unbox(currentNode) ?? "0");
   const definitions = unbox(data.schedules) || {};
-  const choices = currentNode.values || Object.keys(definitions);
-  const enabled = Boolean(unbox(data.enabled));
-  const activeDefinition = definitions[current] || {};
-  const editable = weeklyDefinition(activeDefinition);
-  const draft = state.scheduleDraft?.deviceId === device.id && state.scheduleDraft?.pointId === point.id && state.scheduleDraft?.mode === mode && state.scheduleDraft?.scheduleId === current ? state.scheduleDraft : null;
-  return `<div class="schedule-mode"><div class="schedule-mode-toolbar"><div><strong>${escapeHtml(titleCase(mode))}</strong><span>${enabled ? "Following schedule" : "Schedule paused"}</span></div>
-    ${settable ? `<div class="schedule-actions"><select data-schedule-id aria-label="${escapeHtml(titleCase(mode))} programme">${(choices.length ? choices : [current]).map((id) => `<option value="${escapeHtml(id)}" ${String(id) === current ? "selected" : ""}>${escapeHtml(scheduleName(definitions[id], id))}</option>`).join("")}</select><label class="check-control"><input type="checkbox" data-schedule-enabled ${enabled ? "checked" : ""}> Active</label><button class="small-button" data-command="cloud-schedule-current" data-device="${escapeHtml(device.id)}" data-point="${escapeHtml(point.id)}" data-mode="${escapeHtml(mode)}">Apply</button>${editable && !draft ? `<button class="small-button" data-command="schedule-edit" data-device="${escapeHtml(device.id)}" data-point="${escapeHtml(point.id)}" data-mode="${escapeHtml(mode)}" data-schedule="${escapeHtml(current)}">Edit programme</button>` : ""}</div>` : ""}</div>
-    ${draft ? weeklyEditor(draft) : weeklyPreview(activeDefinition)}
-  </div>`;
+  return {
+    point,
+    mode,
+    current,
+    enabled: Boolean(unbox(data.enabled)),
+    choices: (currentNode.values || Object.keys(definitions)).map(String),
+    definitions,
+    week: weekEvents(definitions[current]),
+    editable: Boolean(weeklyDefinition(definitions[current])),
+  };
+}
+
+function pointSchedules(point) {
+  return Object.entries(scheduleModes(point.schedule)).map(([mode, data]) => modeSchedule(point, mode, unbox(data) || {}));
+}
+
+function weekEvents(definition) {
+  const value = unbox(definition) || {};
+  if (!days.some((day) => Object.hasOwn(value, day))) return null;
+  return Object.fromEntries(days.map((day) => {
+    const events = unbox(value[day]);
+    return [day, (Array.isArray(events) ? events : []).map((node) => {
+      const item = unbox(node) || {};
+      return { time: formatTime(unbox(item.time ?? item.startTime ?? item.StartTime) ?? ""), target: unbox(item.value ?? item.temperature ?? item.targetTemperature ?? item.TargetTemperature) };
+    }).filter((event) => toMinutes(event.time) !== null).sort((a, b) => toMinutes(a.time) - toMinutes(b.time))];
+  }));
 }
 
 function scheduleName(definition, fallback) {
-  const name = unbox(definition?.name);
+  const name = unbox(unbox(definition)?.name);
   return name ? String(name) : `Programme ${fallback}`;
 }
 
-function weeklyPreview(definition) {
-  const value = unbox(definition) || {};
-  if (!days.some((day) => Object.hasOwn(value, day))) return `<p class="metric-note schedule-empty">The active programme has no day-by-day preview.</p>`;
-  const rows = days.map((day) => {
-    const events = unbox(value[day]) || [];
-    return `<div class="day-row"><span class="day-name">${dayLabels[day]}</span><div class="slots">${events.length ? events.map((event) => {
-      const item = unbox(event) || {};
-      const time = unbox(item.time ?? item.startTime ?? item.StartTime) ?? "—";
-      const target = unbox(item.value ?? item.temperature ?? item.targetTemperature ?? item.TargetTemperature);
-      return `<span class="slot">${escapeHtml(formatTime(time))}${target !== undefined ? ` <b>${escapeHtml(target)}°</b>` : ""}</span>`;
-    }).join("") : `<span class="metric-note">No changes</span>`}</div></div>`;
+function toMinutes(time) {
+  const match = /^(\d{1,2}):?(\d{2})$/.exec(String(time));
+  if (!match) return null;
+  const minutes = Number(match[1]) * 60 + Number(match[2]);
+  return minutes >= 0 && minutes < 1440 ? minutes : null;
+}
+
+function formatTime(value) {
+  const text = String(value);
+  return /^\d{4}$/.test(text) ? `${text.slice(0, 2)}:${text.slice(2)}` : text;
+}
+
+function todayKey(date = new Date()) {
+  return days[(date.getDay() + 6) % 7];
+}
+
+function carryIn(week, day) {
+  const index = days.indexOf(day);
+  for (let back = 1; back <= 7; back += 1) {
+    const events = week[days[(index - back + 7) % 7]] || [];
+    if (events.length) return events.at(-1).target;
+  }
+  return null;
+}
+
+function targetText(target) {
+  return typeof target === "number" ? `${formatNumber(target)}°` : sentenceCase(target);
+}
+
+function timeline(week, day, { now = false, kind } = {}) {
+  const events = week[day] || [];
+  const segments = [];
+  let start = 0;
+  let value = carryIn(week, day);
+  for (const event of events) {
+    const at = toMinutes(event.time);
+    if (at > start) segments.push({ start, end: at, value });
+    start = at;
+    value = event.target;
+  }
+  segments.push({ start, end: 1440, value });
+  const pct = (minutes) => ((minutes / 1440) * 100).toFixed(3);
+  const rects = segments.map((segment) => {
+    const color = segment.value === null || segment.value === undefined ? "#9aa7ad" : thermal(segment.value, kind);
+    const width = segment.end - segment.start;
+    return `<rect class="band" x="${pct(segment.start)}%" width="${pct(width)}%" y="0" height="100%" fill="${color}"/>
+      <rect x="${pct(segment.start)}%" width="${pct(width)}%" y="0" height="4" fill="${color}"/>
+      ${width >= 150 && segment.value !== null ? `<text x="${pct(segment.start + 6)}%" y="24">${escapeHtml(targetText(segment.value))}</text>` : ""}`;
   }).join("");
-  return `<div class="schedule-grid">${rows}</div>`;
+  const minutesNow = new Date().getHours() * 60 + new Date().getMinutes();
+  const label = events.length ? events.map((event) => `${event.time} ${targetText(event.target)}`).join(", ") : "no changes";
+  return `<svg class="timeline" role="img" aria-label="${escapeHtml(`${dayLabels[day]}: ${label}`)}">${rects}${now ? `<line class="now" x1="${pct(minutesNow)}%" x2="${pct(minutesNow)}%" y1="0" y2="100%"/>` : ""}</svg>`;
+}
+
+function hourAxis() {
+  return `<svg class="hour-axis" aria-hidden="true">${[0, 6, 12, 18, 24].map((hour) => `<text x="${(hour / 24) * 100}%" y="12" text-anchor="${hour === 0 ? "start" : hour === 24 ? "end" : "middle"}">${String(hour).padStart(2, "0")}:00</text>`).join("")}</svg>`;
+}
+
+function nextChange(week) {
+  const now = new Date();
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  const start = days.indexOf(todayKey(now));
+  for (let ahead = 0; ahead < 7; ahead += 1) {
+    const day = days[(start + ahead) % 7];
+    const event = (week[day] || []).find((item) => ahead > 0 || toMinutes(item.time) > minutes);
+    if (event) return `${targetText(event.target)} at ${event.time}${ahead === 0 ? "" : ahead === 1 ? " tomorrow" : ` on ${dayLabels[day]}`}`;
+  }
+  return "";
+}
+
+function zoneToday(device, zone) {
+  if (!zone.point.schedule) return "";
+  const modes = pointSchedules(zone.point);
+  const active = modes.find((item) => item.mode === zone.currentMode && item.enabled) || modes.find((item) => item.enabled);
+  if (!active) return `<a class="zone-schedule" href="#schedule"><span>Schedule paused</span></a>`;
+  if (!active.week) return `<a class="zone-schedule" href="#schedule"><span>Following ${escapeHtml(scheduleName(active.definitions[active.current], active.current))}</span></a>`;
+  const next = nextChange(active.week);
+  return `<a class="zone-schedule" href="#schedule" aria-label="Open schedule">
+    ${timeline(active.week, todayKey(), { now: true, kind: zone.isTank ? "water" : undefined })}
+    <span>${escapeHtml(scheduleName(active.definitions[active.current], active.current))}${next ? `, next ${escapeHtml(next)}` : ""}</span>
+  </a>`;
+}
+
+/* ---------- Controls ---------- */
+
+function controls(device) {
+  if (device.source !== "cloud") return localControls(device);
+  const zoneList = zones(device).filter((zone) => zone.entries.some((entry) => entry.leaf.settable));
+  return `<section class="page">${pageHead("Controls", "Every setting your heat pump lets you change remotely.", device)}${notices()}
+    ${zoneList.length ? `<div class="control-stack">${zoneList.map((zone) => zoneControls(device, zone)).join("")}</div>` : `<article class="panel empty-card"><h2>No remote settings</h2><p>Daikin reports readings for this heat pump but no settings that can be changed remotely.</p></article>`}
+    ${readingsDrawer(device)}
+  </section>`;
+}
+
+function zoneControls(device, zone) {
+  const title = pointTitle(zone.point);
+  const settable = zone.entries.filter((entry) => entry.leaf.settable);
+  const rows = settable.map((entry) => controlRow(device, zone, entry)).filter(Boolean).join("");
+  return `<article class="panel">
+    <header class="panel-head"><div><h2>${escapeHtml(title)}</h2><p>${escapeHtml(zoneStatus(device, zone, zone.powerReading ? isOn(shownValue(device, zone.powerReading)) : true))}</p></div></header>
+    <div class="control-list">${rows}</div>
+  </article>`;
+}
+
+function inactiveMode(zone, entry) {
+  const match = /\/operationmodes\/([^/]+)\//.exec(entry.key);
+  if (!match || !zone.currentMode) return "";
+  return match[1] === zone.currentMode.toLowerCase() ? "" : match[1];
+}
+
+function controlRow(device, zone, entry) {
+  const { characteristic, leaf } = entry;
+  const label = entry === zone.power ? "Power" : readableLeaf(characteristic, leaf);
+  const idle = inactiveMode(zone, entry);
+  const hint = idle ? `Used when the mode is ${modeLabel(idle).toLowerCase()}` : typeof leaf.value === "number" && Number.isFinite(leaf.min) && Number.isFinite(leaf.max) ? `${displayValue({ ...leaf, step: 0 }, leaf.min)} to ${displayValue({ ...leaf, step: 0 }, leaf.max)}` : entry === zone.boost ? "Heat the tank to its target now, once" : "";
+  let control = "";
+  if (isOnOff(leaf)) control = toggleControl(device, entry, `${pointTitle(zone.point)} ${label}`);
+  else if (Array.isArray(leaf.values) && leaf.values.length) control = choiceControl(device, entry, label);
+  else if (typeof leaf.value === "number") control = inlineStepper(device, entry);
+  else if (typeof leaf.value === "string") control = `<form class="text-control" data-text-key="${escapeHtml(keyOf(device, entry))}"><input name="value" value="${escapeHtml(leaf.value)}" aria-label="${escapeHtml(label)}"><button class="secondary">Save</button></form>`;
+  if (!control) return "";
+  const status = writeStatus(device, entry);
+  return `<div class="control-row${idle ? " is-idle" : ""}"><div><strong>${escapeHtml(label)}</strong>${status || hint ? `<span>${escapeHtml(status || hint)}</span>` : ""}</div>${control}</div>`;
+}
+
+function readingsDrawer(device) {
+  const readOnly = flattenDevice(device).filter((entry) => !entry.leaf.settable && ["string", "number", "boolean"].includes(typeof entry.leaf.value) && !/errorcode|isin\w+state/.test(entry.key));
+  if (!readOnly.length) return "";
+  return `<details class="drawer"><summary>All readings <span>${readOnly.length}</span></summary><dl class="drawer-grid">${readOnly.map((entry) => `<div><dt>${escapeHtml(pointTitle(entry.point))}, ${escapeHtml(readableLeaf(entry.characteristic, entry.leaf).toLowerCase())}</dt><dd>${escapeHtml(displayValue(entry.leaf))}</dd></div>`).join("")}</dl></details>`;
+}
+
+/* ---------- Schedule page ---------- */
+
+function schedule(device) {
+  if (device.source !== "cloud") return localSchedule(device);
+  const items = (device.points || []).filter((point) => point.schedule).flatMap((point) => pointSchedules(point).map((item) => ({ ...item, settable: Boolean(point.schedule.settable) })));
+  return `<section class="page">${pageHead("Schedule", "When your home warms up and cools down through the week.", device)}${notices()}
+    ${items.length ? `<div class="control-stack">${items.map((item) => schedulePanel(device, item)).join("")}</div>` : `<article class="panel empty-card"><h2>No schedules reported</h2><p>Daikin doesn't offer a remote schedule for this heat pump.</p></article>`}
+  </section>`;
+}
+
+function schedulePanel(device, item) {
+  const { point, mode, current, enabled, choices, definitions, settable } = item;
+  const draft = state.scheduleDraft?.deviceId === device.id && state.scheduleDraft?.pointId === point.id && state.scheduleDraft?.mode === item.mode ? state.scheduleDraft : null;
+  const kind = /domestichotwater/i.test(point.type || "") ? "water" : undefined;
+  const data = `data-device="${escapeHtml(device.id)}" data-point="${escapeHtml(point.id)}" data-mode="${escapeHtml(mode)}"`;
+  const today = todayKey();
+  const picker = settable && choices.length > 1
+    ? `<div class="segmented compact" role="radiogroup" aria-label="Programme">${choices.map((id) => `<button role="radio" aria-checked="${id === current}" data-command="schedule-pick" data-schedule="${escapeHtml(id)}" ${data} ${draft ? "disabled" : ""}>${escapeHtml(scheduleName(definitions[id], id))}</button>`).join("")}</div>`
+    : `<span class="chip">${escapeHtml(scheduleName(definitions[current], current))}</span>`;
+  const body = draft ? weeklyEditor(draft, kind) : item.week
+    ? `<div class="week">${days.map((day) => `<div class="week-row${day === today ? " is-today" : ""}"><span>${dayLabels[day]}</span>${timeline(item.week, day, { now: day === today, kind })}</div>`).join("")}<div class="week-row axis"><span></span>${hourAxis()}</div></div>`
+    : `<p class="muted">This programme can't be shown day by day.</p>`;
+  return `<article class="panel schedule-panel">
+    <header class="panel-head"><div><h2>${escapeHtml(pointTitle(point))}, ${escapeHtml(modeLabel(mode).toLowerCase())}</h2><p>${enabled ? `Following the schedule${item.week ? `, next ${escapeHtml(nextChange(item.week) || "change not set")}` : ""}` : "Paused. The heat pump holds its current target."}</p></div>
+      ${settable ? `<div class="switch-inline"><span>Follow schedule</span><button class="toggle" role="switch" aria-checked="${enabled}" aria-label="Follow ${escapeHtml(modeLabel(mode).toLowerCase())} schedule" data-command="schedule-enable" data-schedule="${escapeHtml(current)}" data-enabled="${!enabled}" ${data} ${draft ? "disabled" : ""}></button></div>` : ""}
+    </header>
+    <div class="schedule-tools">${picker}${settable && item.editable && !draft ? `<button class="secondary" data-command="schedule-edit" data-schedule="${escapeHtml(current)}" ${data}>Edit ${escapeHtml(scheduleName(definitions[current], current))}</button>` : ""}</div>
+    ${body}
+  </article>`;
 }
 
 function isValueWrapper(value) {
@@ -367,24 +705,31 @@ function weeklyDefinition(definition) {
       const timeKey = ["time", "startTime", "StartTime"].find((key) => Object.hasOwn(event, key));
       const targetKey = ["value", "temperature", "targetTemperature", "TargetTemperature"].find((key) => Object.hasOwn(event, key));
       if (!timeKey || !targetKey) return null;
-      result[day].push({ time: String(unbox(event[timeKey])), target: Number(unbox(event[targetKey])) });
+      const target = Number(unbox(event[targetKey]));
+      if (!Number.isFinite(target)) return null;
+      result[day].push({ time: formatTime(unbox(event[timeKey])), target });
     }
   }
   return result;
 }
 
-function weeklyEditor(draft) {
-  return `<div class="weekly-editor"><div class="editor-intro"><div><strong>Edit ${escapeHtml(draft.name)}</strong><span>Set each change, then save the complete programme.</span></div><button class="text-button" data-command="schedule-cancel">Cancel</button></div>
-    <div class="schedule-editor-days">${days.map((day) => `<section class="editor-day" data-editor-day="${day}"><div class="editor-day-head"><span class="day-name">${dayLabels[day]}</span><button class="small-button" data-command="schedule-add" data-day="${day}">+ Add change</button></div><div class="editor-events">${draft.days[day].map((event, index) => scheduleEventRow(day, index, event)).join("") || `<span class="metric-note no-events">No changes</span>`}</div></section>`).join("")}</div>
-    <div class="editor-footer"><button class="primary" data-command="schedule-save">Save programme</button><span>Changes are sent to your heat pump only when you save.</span></div>
+function weeklyEditor(draft, kind) {
+  return `<div class="weekly-editor">
+    ${days.map((day) => `<section class="editor-day" data-editor-day="${day}">
+      <div class="editor-day-head"><strong>${dayLabels[day]}</strong><div class="editor-copy"><button class="text-button" data-command="schedule-copy" data-day="${day}" data-to="weekdays">Copy to weekdays</button><button class="text-button" data-command="schedule-copy" data-day="${day}" data-to="all">Copy to every day</button></div></div>
+      ${timeline(draft.days, day, { kind })}
+      <div class="editor-events">${draft.days[day].map((event, index) => scheduleEventRow(day, index, event)).join("")}<button class="add-change" data-command="schedule-add" data-day="${day}" data-focus="add-${day}">Add change</button></div>
+    </section>`).join("")}
+    <div class="editor-footer"><button class="primary" data-command="schedule-save">Save ${escapeHtml(draft.name)}</button><button class="secondary" data-command="schedule-cancel">Discard changes</button><span>Nothing is sent to the heat pump until you save.</span></div>
   </div>`;
 }
 
 function scheduleEventRow(day, index, event) {
-  return `<div class="editor-event" data-event-index="${index}"><label>Time<input type="time" data-event-time value="${escapeHtml(formatTime(event.time))}"></label><label>Target<input type="number" data-event-target value="${escapeHtml(event.target)}" step="0.5"><span>°C</span></label><button class="remove-button" data-command="schedule-remove" data-day="${day}" data-index="${index}" aria-label="Remove ${dayLabels[day]} change">×</button></div>`;
+  return `<div class="editor-event" data-event-index="${index}"><label><span>From</span><input type="time" data-event-time value="${escapeHtml(event.time)}" data-focus="ed-${day}-${index}-time"></label><label><span>Target</span><input type="number" inputmode="decimal" data-event-target value="${escapeHtml(event.target)}" step="0.5" data-focus="ed-${day}-${index}-target"><i>°C</i></label><button class="remove-button" data-command="schedule-remove" data-day="${day}" data-index="${index}" aria-label="Remove ${dayLabels[day]} change at ${escapeHtml(event.time)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17"/></svg></button></div>`;
 }
 
-function captureScheduleDraft(container) {
+function captureScheduleDraft() {
+  const container = app.querySelector(".weekly-editor");
   if (!state.scheduleDraft || !container) return;
   for (const day of days) {
     state.scheduleDraft.days[day] = [...container.querySelectorAll(`[data-editor-day="${day}"] .editor-event`)].map((row) => ({
@@ -416,14 +761,53 @@ function rebuildWeeklyDefinitions(draft) {
   return definitions;
 }
 
-function formatTime(value) {
-  const text = String(value);
-  return /^\d{4}$/.test(text) ? `${text.slice(0, 2)}:${text.slice(2)}` : text;
+/* ---------- Local adapter (BRP069A61/A62) ---------- */
+
+function localOverview(device) {
+  const space = device.controls?.space || {};
+  const tank = device.controls?.tank || {};
+  return `<section class="page">${pageHead(device.name || "Home", `${space.operationMode ? sentenceCase(space.operationMode) : "Ready"}. Connected on your home network.`, device)}
+    <dl class="readings">${[["Room", space.indoorTemperature], ["Outside", space.outdoorTemperature], ["Tank", tank.temperature], ["Room target", space.targetTemperature], ["Tank target", tank.targetTemperature]].filter(([, value]) => value !== undefined).map(([label, value]) => `<div><dt>${label}</dt><dd>${escapeHtml(formatNumber(value))}°</dd></div>`).join("")}</dl>
+  </section>`;
+}
+
+function localControls(device) {
+  const space = device.controls?.space || {};
+  const tank = device.controls?.tank || {};
+  return `<section class="page">${pageHead("Controls", "Settings sent directly over your home network.", device)}
+    <div class="control-stack"><article class="panel"><header class="panel-head"><div><h2>Heating</h2></div></header><div class="control-list">${localNumberControl("Room target", "space.targetTemperature", space.targetTemperature, 0.5)}${localNumberControl("Weather curve offset", "space.leavingWaterOffset", space.leavingWaterOffset, 1)}</div></article>
+    <article class="panel"><header class="panel-head"><div><h2>Hot water</h2></div></header><div class="control-list">${localNumberControl("Tank target", "tank.targetTemperature", tank.targetTemperature, 1)}</div></article></div></section>`;
+}
+
+function localNumberControl(label, action, value, step) {
+  return `<div class="control-row"><div><strong>${escapeHtml(label)}</strong></div><div class="stepper"><button class="step" data-action="${escapeHtml(action)}" data-value="${Number(value) - step}" aria-label="Lower ${escapeHtml(label.toLowerCase())}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12"/></svg></button><output>${escapeHtml(value)}°</output><button class="step" data-action="${escapeHtml(action)}" data-value="${Number(value) + step}" aria-label="Raise ${escapeHtml(label.toLowerCase())}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button></div></div>`;
 }
 
 function localSchedule(device) {
-  const scheduleData = device.schedules?.space || {};
-  return `<section>${deviceHeader(device, "Weekly rhythm", "Schedules")}<article class="card"><div class="schedule-grid">${days.map((day) => `<div class="day-row"><span class="day-name">${dayLabels[day]}</span><div class="slots">${(scheduleData[day] || []).map((slot) => `<span class="slot">${escapeHtml(slot.time)} <b>${escapeHtml(slot.value)}°</b></span>`).join("") || `<span class="metric-note">No changes</span>`}</div><button class="small-button" data-command="add-slot" data-day="${day}">+</button></div>`).join("")}</div><div class="divider"></div><button class="primary" data-command="save-schedule">Save schedule</button></article></section>`;
+  const week = Object.fromEntries(days.map((day) => [day, (device.schedules?.space?.[day] || []).map((slot) => ({ time: slot.time, target: slot.value }))]));
+  const today = todayKey();
+  return `<section class="page">${pageHead("Schedule", "Heating programme stored on the local adapter.", device)}
+    <article class="panel schedule-panel"><div class="week">${days.map((day) => `<div class="week-row${day === today ? " is-today" : ""}"><span>${dayLabels[day]}</span>${timeline(week, day, { now: day === today })}<button class="text-button" data-command="add-slot" data-day="${day}">Add</button></div>`).join("")}<div class="week-row axis"><span></span>${hourAxis()}</div></div>
+    <div class="editor-footer"><button class="primary" data-command="save-schedule">Save schedule</button></div></article></section>`;
+}
+
+/* ---------- Waiting and system ---------- */
+
+function waitingForGateway() {
+  const cloud = state.settings?.onecta || {};
+  const steps = [
+    { label: "Connect your Daikin account", done: Boolean(cloud.connected) },
+    { label: "Daikin releases the Wi-Fi adapter from its previous owner", done: false },
+    { label: "Add the heat pump in the ONECTA app", done: false },
+  ];
+  const current = steps.findIndex((step) => !step.done);
+  return `<section class="page">${notices()}${pageHead(cloud.connected ? "Waiting for your heat pump" : "Connect your heat pump", cloud.connected
+    ? "Your Daikin account is connected, but it doesn't list a heat pump yet. Controls appear here as soon as it does."
+    : "Sign in with the Daikin account that owns the heat pump. Controls appear once Daikin lists it.")}
+    <article class="panel waiting">
+      <ol class="steps">${steps.map((step, index) => `<li class="${step.done ? "done" : index === current ? "current" : ""}"><span>${step.done ? `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>` : index + 1}</span>${escapeHtml(step.label)}</li>`).join("")}</ol>
+      <div class="button-row">${cloud.connected ? `<button class="primary" data-command="reload">Check again</button><a class="secondary" href="#system">Connection details</a>` : `<a class="primary" href="#system">Set up connection</a>`}</div>
+    </article></section>`;
 }
 
 function system(device) {
@@ -436,44 +820,93 @@ function system(device) {
     model: settings.local.adapterModel,
     checkedAt: settings.local.checkedAt,
   } : { status: "unknown", host: settings.local?.host || "" });
-  const remainingDay = state.rateLimit.remainingDay;
-  const limitDay = state.rateLimit.limitDay;
-  const accountState = cloud.connected ? (state.devices.length ? "Heat pump connected" : "Connected · waiting for gateway") : cloud.configured ? "Ready to authorize" : "Not configured";
-  const gatewayCard = localReachability ? `<article class="card gateway-card"><div class="gateway-card-head"><div><p class="eyebrow">Home network</p><h2>Wi-Fi gateway</h2><p class="subhead">Check whether the adapter responds from this Mac.</p></div><span class="reachability ${gateway.status}"><i></i>${gateway.status === "reachable" ? "Reachable" : gateway.status === "unreachable" ? "Not reachable" : "Not checked"}</span></div>
-      <form id="gateway-check" class="gateway-form"><label>Gateway IP address<input name="host" required inputmode="decimal" placeholder="192.168.1.42" value="${escapeHtml(gateway.host || "")}" autocomplete="off"></label><button class="primary">Check reachability</button></form>
-      <div class="gateway-result">${gateway.status === "reachable" ? `<strong>${escapeHtml(gateway.model || "Daikin Wi-Fi gateway")}</strong><span>${gateway.checkedAt ? `Checked ${escapeHtml(relativeTime(gateway.checkedAt))}` : "Responding on your home network"}</span>` : gateway.status === "unreachable" ? `<strong>No response</strong><span>Check the IP and confirm this Mac is connected to your home Wi-Fi.</span>` : `<span>This read-only check does not change heat-pump settings.</span>`}</div>
-    </article>` : `<article class="card gateway-card"><div class="gateway-card-head"><div><p class="eyebrow">Home network</p><h2>Wi-Fi gateway</h2><p class="subhead">Local reachability is available from the Mac dashboard while you are at home.</p></div><span class="reachability local-only"><i></i>Local only</span></div>
-      <div class="gateway-result"><strong>Remote control stays available</strong><span>This hosted dashboard uses ONECTA and does not expose your home network or Wi-Fi adapter.</span></div>
-    </article>`;
-  return `<section>${device ? deviceHeader(device, "Account & connection", "System", "Connection health and access settings.") : `<div class="page-head"><div><p class="eyebrow">Account & connection</p><h1>System</h1><p class="subhead">Connection health and access settings.</p></div></div>`}${notices()}
-    <div class="grid system-grid">
-      <article class="card connection-card"><div class="connection-state"><span class="big-status ${cloud.connected ? "ok" : ""}"></span><div><p class="eyebrow">Daikin account</p><h2>${escapeHtml(accountState)}</h2></div></div>
-        <div class="diagnostic-list">${infoRow("Authorization", cloud.connected ? "Active" : "Not connected")}${infoRow("Gateway devices", state.devices.filter((item) => item.source === "cloud").length)}${remainingDay !== null && remainingDay !== undefined ? infoRow("API requests today", `${remainingDay} of ${limitDay ?? "—"} remaining`) : ""}</div>
-        <div class="button-row">${cloud.configured ? `<a class="primary" href="/api/cloud/connect">${cloud.connected ? "Reconnect account" : "Connect account"}</a>` : ""}<button class="secondary" data-command="reload">Refresh status</button></div>
+  const { remainingDay, limitDay, remainingMinute, limitMinute } = state.rateLimit;
+  const accountState = cloud.connected ? (state.devices.length ? "Connected" : "Connected, no heat pump listed yet") : cloud.configured ? "Ready to sign in" : "Not set up";
+  const usage = Number.isFinite(remainingDay) && Number.isFinite(limitDay) ? clamp(1 - remainingDay / limitDay, 0, 1) : null;
+  const gatewayCard = localReachability ? `<article class="panel">
+      <header class="panel-head"><div><h2>Wi-Fi adapter</h2><p>Checks whether the adapter answers on your home network. Nothing is changed on the heat pump.</p></div><span class="status-dot ${gateway.status}">${gateway.status === "reachable" ? "Reachable" : gateway.status === "unreachable" ? "No response" : "Not checked"}</span></header>
+      <form id="gateway-check" class="inline-form"><label><span>Adapter IP address</span><input name="host" required inputmode="decimal" placeholder="192.168.1.42" value="${escapeHtml(gateway.host || "")}" autocomplete="off"></label><button class="primary">Check adapter</button></form>
+      ${gateway.status === "reachable" ? `<p class="muted">${escapeHtml(gateway.model || "Daikin Wi-Fi adapter")} answered ${gateway.checkedAt ? escapeHtml(relativeTime(gateway.checkedAt)) : "just now"}.</p>` : gateway.status === "unreachable" ? `<p class="muted">No answer. Check the address and that this Mac is on your home Wi-Fi.</p>` : ""}
+    </article>` : `<article class="panel"><header class="panel-head"><div><h2>Wi-Fi adapter</h2><p>This hosted dashboard talks only to Daikin's cloud and never reaches into your home network. Adapter checks are available from the dashboard on your Mac.</p></div><span class="status-dot local-only">Home network only</span></header></article>`;
+  return `<section class="page">${pageHead("System", "Daikin account, API usage and the Wi-Fi adapter.", device)}${notices()}
+    <div class="system-grid">
+      <article class="panel">
+        <header class="panel-head"><div><h2>Daikin account</h2><p>${escapeHtml(accountState)}</p></div><span class="status-dot ${cloud.connected ? "reachable" : "unknown"}">${cloud.connected ? "Signed in" : "Signed out"}</span></header>
+        <dl class="facts">
+          <div><dt>Heat pumps listed</dt><dd>${state.devices.filter((item) => item.source === "cloud").length}</dd></div>
+          ${Number.isFinite(remainingMinute) ? `<div><dt>Requests left this minute</dt><dd>${remainingMinute} of ${limitMinute ?? "—"}</dd></div>` : ""}
+          ${usage !== null ? `<div><dt>Requests left today</dt><dd>${remainingDay} of ${limitDay}</dd></div>` : ""}
+        </dl>
+        ${usage !== null ? `<svg class="quota" role="img" aria-label="${escapeHtml(`${Math.round(usage * 100)}% of today's Daikin requests used`)}"><rect class="quota-track" width="100%" height="100%" rx="4"/><rect class="quota-used${usage > 0.85 ? " is-high" : ""}" width="${(usage * 100).toFixed(1)}%" height="100%" rx="4"/></svg><p class="muted">Readings are cached for 8 minutes so normal use stays within Daikin's daily limit.</p>` : ""}
+        <div class="button-row">${cloud.configured ? `<a class="primary" href="/api/cloud/connect">${cloud.connected ? "Sign in again" : "Sign in with Daikin"}</a>` : ""}<button class="secondary" data-command="reload">Refresh now</button></div>
       </article>
-      <details class="card credentials-card" ${cloud.configured ? "" : "open"}><summary><div><p class="eyebrow">Developer access</p><h2>ONECTA credentials</h2><p class="subhead">Saved only on this controller.</p></div><span>${cloud.configured ? "Edit" : "Set up"}</span></summary>
-        <div class="credentials-body"><form id="cloud-settings" class="settings-form"><label>Client ID<input name="clientId" value="${escapeHtml(cloud.clientId || "")}" autocomplete="off"></label><label>Client secret<input type="password" name="clientSecret" placeholder="${cloud.hasClientSecret ? "Saved — leave blank to keep" : "Required"}" autocomplete="new-password"></label><label>Redirect URI<input readonly value="${escapeHtml(cloud.redirectUri || "")}"></label><button class="primary">Save credentials</button></form></div>
+      <details class="panel credentials" ${cloud.configured ? "" : "open"}><summary><div><h2>Developer app</h2><p>Client ID and secret from the Daikin developer portal, stored encrypted.</p></div><span class="chip">${cloud.configured ? "Edit" : "Set up"}</span></summary>
+        <form id="cloud-settings" class="settings-form"><label><span>Client ID</span><input name="clientId" value="${escapeHtml(cloud.clientId || "")}" autocomplete="off"></label><label><span>Client secret</span><input type="password" name="clientSecret" placeholder="${cloud.hasClientSecret ? "Saved. Leave blank to keep it." : "Required"}" autocomplete="new-password"></label><label><span>Redirect URI to register with Daikin</span><input readonly value="${escapeHtml(cloud.redirectUri || "")}"></label><button class="primary">Save credentials</button></form>
       </details>
     </div>
     ${gatewayCard}
-    ${cloud.connected ? `<details class="danger-zone"><summary>Connection options</summary><div><p>Disconnecting removes the saved Daikin session from this controller. It does not remove the heat pump from your Daikin account.</p><button class="danger" data-command="cloud-disconnect">Disconnect Daikin account</button></div></details>` : ""}
+    ${cloud.connected ? `<details class="drawer danger-zone"><summary>Disconnect Daikin account</summary><div><p>Removes the saved Daikin sign-in from this dashboard. The heat pump stays in your Daikin account, and Daikin keeps the session active until it expires.</p><button class="danger" data-command="cloud-disconnect">Disconnect</button></div></details>` : ""}
   </section>`;
 }
 
-function infoRow(label, value) {
-  return `<div class="diagnostic"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`;
-}
+/* ---------- Render and events ---------- */
 
 function render() {
   if (state.loading) return;
   const route = currentRoute();
-  document.querySelectorAll("[data-route]").forEach((link) => link.classList.toggle("active", link.dataset.route === route));
+  document.querySelectorAll("[data-route]").forEach((link) => {
+    link.classList.toggle("active", link.dataset.route === route);
+    if (link.dataset.route === route) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
+  const focusKey = document.activeElement?.dataset?.focus;
   const device = activeDevice();
   if (!device && route !== "system") app.innerHTML = waitingForGateway();
   else if (route === "overview") app.innerHTML = overview(device);
   else if (route === "controls") app.innerHTML = controls(device);
   else if (route === "schedule") app.innerHTML = schedule(device);
   else app.innerHTML = system(device);
+  if (focusKey) app.querySelector(`[data-focus="${CSS.escape(focusKey)}"]`)?.focus({ preventScroll: true });
+}
+
+function controlLabel(entry) {
+  return `${pointTitle(entry.point)} ${readableLeaf(entry.characteristic, entry.leaf).toLowerCase()}`;
+}
+
+function queueWrite(device, entry, value, delay = 0) {
+  const key = keyOf(device, entry);
+  const existing = state.writes.get(key);
+  if (existing?.status === "sending") return;
+  clearTimeout(existing?.timer);
+  if (delay && value === entry.leaf.value) {
+    state.writes.delete(key);
+    render();
+    return;
+  }
+  const write = { value, status: "waiting" };
+  write.timer = setTimeout(() => commitWrite(device, entry, key, write), delay);
+  state.writes.set(key, write);
+  render();
+}
+
+async function commitWrite(device, entry, key, write) {
+  write.status = "sending";
+  render();
+  try {
+    await request("/api/action", { method: "POST", body: JSON.stringify({ source: "cloud", deviceId: device.id, pointId: entry.point.id, characteristic: entry.characteristic.name, path: entry.leaf.path, value: write.value }) });
+    // The write already cleared the server cache; keep the confirmed value
+    // locally instead of spending another ONECTA request on a refetch.
+    entry.leaf.value = write.value;
+    const message = isOnOff(entry.leaf) && entry.characteristic.name === "onOffMode"
+      ? `${pointTitle(entry.point)} turned ${isOn(write.value) ? "on" : "off"}`
+      : `${controlLabel(entry)} set to ${displayValue(entry.leaf, write.value)}`;
+    toast(message.charAt(0).toUpperCase() + message.slice(1));
+  } catch (error) {
+    toast(`${controlLabel(entry)} not changed. ${error.message}`, true);
+  } finally {
+    if (state.writes.get(key) === write) state.writes.delete(key);
+    render();
+  }
 }
 
 async function withPending(button, task) {
@@ -482,13 +915,13 @@ async function withPending(button, task) {
   const original = button?.textContent;
   if (button) {
     button.disabled = true;
-    if (!button.classList.contains("toggle")) button.textContent = "Working…";
+    if (!button.classList.contains("toggle") && button.getAttribute("role") !== "radio") button.textContent = "Working…";
   }
   try {
     await task();
   } catch (error) {
     toast(error.message, true);
-    if (button) {
+    if (button?.isConnected) {
       button.disabled = false;
       button.textContent = original;
     }
@@ -497,18 +930,44 @@ async function withPending(button, task) {
   }
 }
 
+function writeCurrentSchedule(button, scheduleId, enabled) {
+  return withPending(button, async () => {
+    await request("/api/schedule", { method: "PUT", body: JSON.stringify({ source: "cloud", deviceId: button.dataset.device, pointId: button.dataset.point, mode: button.dataset.mode, section: "current", value: { scheduleId, enabled } }) });
+    state.scheduleDraft = null;
+    toast(enabled ? "Schedule on" : "Schedule paused");
+    await load(true);
+  });
+}
+
 app.addEventListener("change", (event) => {
   const picker = event.target.closest("[data-device-picker]");
   if (picker) {
     state.selectedId = picker.value;
+    state.scheduleDraft = null;
+    render();
+    return;
+  }
+  const choice = event.target.closest("[data-choice-key]");
+  if (choice) {
+    const found = entryByKey(choice.dataset.choiceKey);
+    if (found) queueWrite(found.device, found.entry, found.entry.leaf.values[Number(choice.value)]);
+    return;
+  }
+  if (event.target.closest(".weekly-editor")) {
+    captureScheduleDraft();
     render();
   }
 });
 
 app.addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (event.target.matches("#gateway-check")) {
-    const form = event.target;
+  const form = event.target;
+  if (form.matches("[data-text-key]")) {
+    const found = entryByKey(form.dataset.textKey);
+    if (found) queueWrite(found.device, found.entry, String(new FormData(form).get("value")));
+    return;
+  }
+  if (form.matches("#gateway-check")) {
     const button = form.querySelector("button");
     const host = new FormData(form).get("host");
     if (state.pending) return;
@@ -518,19 +977,18 @@ app.addEventListener("submit", async (event) => {
     try {
       const result = await request("/api/local/probe", { method: "POST", body: JSON.stringify({ host }) });
       state.gatewayCheck = { status: "reachable", host: result.host, model: result.adapterModel, checkedAt: new Date().toISOString() };
-      toast("Wi-Fi gateway is reachable");
+      toast("Wi-Fi adapter answered");
       await load();
     } catch {
       state.gatewayCheck = { status: "unreachable", host: String(host || ""), checkedAt: new Date().toISOString() };
-      toast("Wi-Fi gateway did not respond", true);
+      toast("Wi-Fi adapter didn't answer", true);
       render();
     } finally {
       state.pending = false;
     }
     return;
   }
-  if (!event.target.matches("#cloud-settings")) return;
-  const form = event.target;
+  if (!form.matches("#cloud-settings")) return;
   const button = form.querySelector("button");
   const data = new FormData(form);
   await withPending(button, async () => {
@@ -541,11 +999,6 @@ app.addEventListener("submit", async (event) => {
 });
 
 app.addEventListener("click", async (event) => {
-  const routeLink = event.target.closest("[data-route-to]");
-  if (routeLink) {
-    location.hash = routeLink.dataset.routeTo;
-    return;
-  }
   const action = event.target.closest("[data-action]");
   if (action) {
     return withPending(action, async () => {
@@ -558,32 +1011,32 @@ app.addEventListener("click", async (event) => {
   const command = button?.dataset.command;
   if (!command) return;
   if (command === "reload") return withPending(button, () => load(true));
+  if (command === "toggle" || command === "choose" || command === "step") {
+    const found = entryByKey(button.dataset.key);
+    if (!found) return;
+    const { device, entry } = found;
+    const current = shownValue(device, entry);
+    if (command === "toggle") return queueWrite(device, entry, flipped(entry.leaf, current));
+    if (command === "choose") return queueWrite(device, entry, entry.leaf.values[Number(button.dataset.index)]);
+    const step = stepValue(entry.leaf);
+    let next = Math.round((Number(current) + Number(button.dataset.dir) * step) / step) * step;
+    next = Number(next.toFixed(4));
+    if (Number.isFinite(entry.leaf.min)) next = Math.max(entry.leaf.min, next);
+    if (Number.isFinite(entry.leaf.max)) next = Math.min(entry.leaf.max, next);
+    return queueWrite(device, entry, next, WRITE_DELAY);
+  }
+  if (command === "energy-period") {
+    state.energyPeriod = button.dataset.period;
+    render();
+    return;
+  }
   if (command === "cloud-disconnect") return withPending(button, async () => {
     await request("/api/cloud/disconnect", { method: "POST", body: "{}" });
     toast("Daikin account disconnected");
     await load();
   });
-  if (command === "cloud-write") {
-    const root = button.closest(".control-field, .setpoint-control")?.querySelector("[data-cloud-action]") || button.closest("[data-cloud-action]");
-    if (!root) return;
-    const raw = root.matches("input,select") ? root.value : root.dataset.value;
-    return withPending(button, async () => {
-      await request("/api/action", { method: "POST", body: JSON.stringify({ source: "cloud", deviceId: root.dataset.device, pointId: root.dataset.point, characteristic: root.dataset.characteristic, path: root.dataset.path, value: parseValue(raw) }) });
-      toast(`${readableControl(root)} updated`);
-      await load(true);
-    });
-  }
-  if (command === "cloud-schedule-current") {
-    const mode = button.closest(".schedule-mode");
-    const scheduleId = mode.querySelector("[data-schedule-id]").value;
-    const enabled = mode.querySelector("[data-schedule-enabled]").checked;
-    return withPending(button, async () => {
-      await request("/api/schedule", { method: "PUT", body: JSON.stringify({ source: "cloud", deviceId: button.dataset.device, pointId: button.dataset.point, mode: button.dataset.mode, section: "current", value: { scheduleId, enabled } }) });
-      state.scheduleDraft = null;
-      toast("Schedule updated");
-      await load(true);
-    });
-  }
+  if (command === "schedule-pick") return writeCurrentSchedule(button, button.dataset.schedule, true);
+  if (command === "schedule-enable") return writeCurrentSchedule(button, button.dataset.schedule, button.dataset.enabled === "true");
   if (command === "schedule-edit") {
     const device = state.devices.find((item) => item.id === button.dataset.device);
     const point = device?.points.find((item) => item.id === button.dataset.point);
@@ -591,7 +1044,7 @@ app.addEventListener("click", async (event) => {
     const definitions = unbox(modeData.schedules) || {};
     const definition = definitions[button.dataset.schedule];
     const dayData = weeklyDefinition(definition);
-    if (!dayData) return toast("This programme format cannot be edited safely", true);
+    if (!dayData) return toast("This programme's format can't be edited here", true);
     state.scheduleDraft = {
       deviceId: button.dataset.device,
       pointId: button.dataset.point,
@@ -610,27 +1063,43 @@ app.addEventListener("click", async (event) => {
     return;
   }
   if (command === "schedule-add") {
-    captureScheduleDraft(button.closest(".weekly-editor"));
-    state.scheduleDraft.days[button.dataset.day].push({ time: "06:00", target: 20 });
+    captureScheduleDraft();
+    const events = state.scheduleDraft.days[button.dataset.day];
+    const last = events.at(-1);
+    const lastMinutes = last ? toMinutes(last.time) ?? 360 : 240;
+    const at = Math.min(lastMinutes + 120, 23 * 60 + 30);
+    events.push({ time: `${String(Math.floor(at / 60)).padStart(2, "0")}:${String(at % 60).padStart(2, "0")}`, target: last?.target ?? 20 });
     render();
+    app.querySelector(`[data-focus="ed-${button.dataset.day}-${events.length - 1}-time"]`)?.focus();
     return;
   }
   if (command === "schedule-remove") {
-    captureScheduleDraft(button.closest(".weekly-editor"));
+    captureScheduleDraft();
     state.scheduleDraft.days[button.dataset.day].splice(Number(button.dataset.index), 1);
     render();
     return;
   }
+  if (command === "schedule-copy") {
+    captureScheduleDraft();
+    const source = state.scheduleDraft.days[button.dataset.day];
+    const targets = button.dataset.to === "weekdays" ? weekdays : days;
+    for (const day of targets) if (day !== button.dataset.day) state.scheduleDraft.days[day] = structuredClone(source);
+    render();
+    toast(`${dayLabels[button.dataset.day]} copied to ${button.dataset.to === "weekdays" ? "weekdays" : "every day"}. Save to apply.`);
+    return;
+  }
   if (command === "schedule-save") {
-    captureScheduleDraft(button.closest(".weekly-editor"));
+    captureScheduleDraft();
     const draft = state.scheduleDraft;
-    const invalid = days.some((day) => draft.days[day].some((item) => !/^([01]\d|2[0-3]):[0-5]\d$/.test(item.time) || !Number.isFinite(item.target)));
-    if (invalid) return toast("Check every schedule time and temperature", true);
+    const invalid = days.find((day) => draft.days[day].some((item) => !/^([01]\d|2[0-3]):[0-5]\d$/.test(item.time) || !Number.isFinite(item.target)));
+    if (invalid) return toast(`Check the times and targets on ${dayLabels[invalid]}`, true);
+    const duplicate = days.find((day) => new Set(draft.days[day].map((item) => item.time)).size !== draft.days[day].length);
+    if (duplicate) return toast(`${dayLabels[duplicate]} has two changes at the same time`, true);
     for (const day of days) draft.days[day].sort((left, right) => left.time.localeCompare(right.time));
     return withPending(button, async () => {
       await request("/api/schedule", { method: "PUT", body: JSON.stringify({ source: "cloud", deviceId: draft.deviceId, pointId: draft.pointId, mode: draft.mode, section: "schedules", value: rebuildWeeklyDefinitions(draft) }) });
       state.scheduleDraft = null;
-      toast("Programme saved");
+      toast(`${draft.name} saved`);
       await load(true);
     });
   }
@@ -653,10 +1122,6 @@ app.addEventListener("click", async (event) => {
   });
 });
 
-function readableControl(element) {
-  return element.closest(".control-field, .setpoint-control, .switch-field")?.querySelector("label,strong")?.textContent?.trim() || "Control";
-}
-
 function parseValue(value) {
   if (value === "true") return true;
   if (value === "false") return false;
@@ -673,7 +1138,16 @@ function relativeTime(value) {
   return `${Math.round(seconds / 3600)} hr ago`;
 }
 
-window.addEventListener("hashchange", render);
+window.addEventListener("hashchange", () => {
+  render();
+  app.focus({ preventScroll: true });
+  window.scrollTo(0, 0);
+});
+// Coming back to the app after a while shows fresh readings. A plain load
+// is served from the server's 8-minute cache, so this costs little quota.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && !state.writes.size && Date.now() - state.loadedAt > STALE_AFTER) load();
+});
 refreshButton.addEventListener("click", () => load(true));
 if (new URLSearchParams(location.search).get("connected") === "1") {
   history.replaceState({}, "", `${location.pathname}${location.hash || "#overview"}`);
