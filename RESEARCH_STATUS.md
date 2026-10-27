@@ -36,10 +36,10 @@ As of 2026-10-27:
 
 The Vercel function, production environment, custom-domain routing, TLS, Basic
 authentication, public OAuth callback, and encrypted Redis integration are
-deployed and verified. The existing local ONECTA credentials/session have not
-yet been exported to the hosted store; this requires explicit user approval,
-or a fresh ONECTA connection can be made from the hosted UI. The Mac runtime
-remains available for LAN-only checks.
+deployed and verified. With explicit user approval, the existing ONECTA client
+configuration and refresh session were migrated to the encrypted hosted store
+and read back successfully; private LAN settings and transient OAuth/cache data
+were excluded. The Mac runtime remains available for LAN-only checks.
 
 ## Identified installation
 
@@ -267,9 +267,8 @@ so redact those fields before sharing it.
    model-specific UI assumptions.
 4. Verify every reported management point, writable characteristic, schedule,
    range, enum, and unit before performing the first control action.
-5. With explicit approval, migrate the existing local ONECTA credentials and
-   session to the encrypted hosted store, or reconnect from the hosted UI;
-   verify the hosted ONECTA status afterward.
+5. Sign in to the hosted UI with the application password and verify the
+   migrated ONECTA status and device refresh.
 6. Add server-side ONECTA access/refresh-token revocation to **Disconnect
    cloud**.
 

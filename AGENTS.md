@@ -20,9 +20,9 @@ Read these files before changing the project:
   to Vercel, the custom domain is verified, Basic authentication protects all
   UI/API/static routes, and the OAuth callback is the only public route.
 - An Upstash Redis store is attached and application data is encrypted with
-  AES-256-GCM before storage. The existing local ONECTA credentials/session
-  have not yet been copied to it; that sensitive transfer requires explicit
-  user approval, or the user can reconnect ONECTA from the hosted UI.
+  AES-256-GCM before storage. With explicit user approval, the existing local
+  ONECTA client configuration and refresh session were migrated and verified;
+  private LAN settings and transient OAuth/cache data were excluded.
 - ONECTA OAuth is connected, encrypted tokens are stored, and authenticated
   API calls succeed.
 - The PWA now has a capability-driven heat-pump UI: semantic overview cards,
@@ -71,9 +71,8 @@ redacted payload before adding model-specific assumptions.
 2. Inspect and safely map the real device's management points, actions,
    schedules, enum values, ranges, and units. Preserve the generic fallback;
    add model-specific labels only from a redacted real payload.
-3. With explicit approval, migrate the existing local ONECTA credentials and
-   session to the encrypted hosted store, or reconnect from the hosted UI;
-   then verify the hosted ONECTA status and device refresh.
+3. Sign in to the hosted UI with the application password, then verify the
+   migrated ONECTA connection and device refresh.
 4. Implement and test Daikin access/refresh-token revocation for
    **Disconnect cloud**. It currently removes only locally stored tokens.
 5. Continue optional A71 protocol research only as documented in

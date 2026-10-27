@@ -196,11 +196,12 @@ The callback registered at Daikin is then
 `https://heat.example.net/oauth/callback`. It must match exactly.
 
 This installation uses `https://hp.operagrid.net`; the exact registered
-callback is `https://hp.operagrid.net/oauth/callback`. ONECTA OAuth previously
-succeeded in the Mac runtime. Its encrypted credentials and session still need
-to be copied to the hosted store with explicit approval, or the account can be
-reconnected from the hosted UI. The authorized account will continue to return
-no gateway devices while BRP069A71 remains assigned to the previous account.
+callback is `https://hp.operagrid.net/oauth/callback`. With explicit user
+approval, the existing ONECTA client configuration and refresh session were
+migrated from the Mac into the encrypted hosted store; private LAN settings and
+transient OAuth/cache data were excluded. The authorized account will continue
+to return no gateway devices while BRP069A71 remains assigned to the previous
+account.
 
 The repository includes a Vercel entry point and an AES-256-GCM encrypted
 Redis store for settings, OAuth PKCE state, tokens, and the short-lived device
