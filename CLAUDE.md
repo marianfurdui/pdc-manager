@@ -34,10 +34,13 @@ node --test --test-name-pattern="round-trips" test/     # single test by name
 npm run check                  # syntax check all server and browser entry points
 node scripts/research-a71.mjs <private-ip>              # read-only BRP069A71 HTTP/UDP probe (redact IP/MAC in output)
 npm run inspect:a71 -- <adapter-private-ip>             # redacted A71 provisioning metadata over the home LAN
+node scripts/efficiency-audit.mjs                       # day-one energy review: ONE ONECTA request, redacted payload to data/audits/
 docker compose up -d --build   # container; data is in the altherma-data volume
 ```
 
-Run `npm test` and `npm run check` after code changes.
+Run `npm test` and `npm run check` after code changes. New entry points (scripts, server wrappers) must be added to the `check` script.
+
+`npm run dev` serves `demoCloudDevice` and `demoJournal()` from `src/demo.js`; the same fixtures back several tests, so extend the demo data when a new UI path or rule needs something to render or fire. Handler tests (`test/app-handler.test.js`) run `createRequestHandler` on an ephemeral port with an in-memory store object (`init/read/write`), so routes can be tested without disk or Redis.
 
 Environment variables: `HOST` (default `127.0.0.1`), `PORT` (8787), `DATA_DIR` (default `./data`), `APP_PASSWORD` (HTTP Basic auth; the local server **refuses to start** on a non-loopback `HOST` without it, and production requires it), `APP_SECRET` (optional for the file store but required and stable for hosted Redis), `PUBLIC_URL` (HTTPS origin required for OAuth), `DEMO_MODE=true`.
 
@@ -55,7 +58,13 @@ Environment variables: `HOST` (default `127.0.0.1`), `PORT` (8787), `DATA_DIR` (
 - **`src/lib/errors.js`**: throw `AppError(message, status, code, details)` for anything the user should see. Any other error becomes a generic 500 via `publicError`.
 - **`src/lib/http.js`**: `readJson` enforces the content type and a size cap, `safeSegment` encodes untrusted URL path segments, and `fetchWithTimeout` handles upstream calls.
 - **A71 information reader**: `inspectA71Setup` in `src/connectors/local-altherma.js`, `/api/local/a71-inspect`, and `scripts/inspect-a71-setup.mjs` call only the exact read-only provisioning routes recovered from ONECTA, including the verified `/config/wlan/info` status reader. They work on the home LAN while AP is off and RUN is solid. Results expose structural metadata and a small allowlist of non-identifying values; IDs, MAC, IP, serial, SSIDs, error details, and body content are suppressed. The current ONECTA bundle's retrieval-only `POST /dsiot/multireq` diagnostic request was explicitly approved and tested once; the A71 returned HTTP 404. Never call `PUT config/wlan/settings`, `POST config/wlan/scan`, `POST config/cloud/connect`, reboot, firmware, or another mutating route without a separate reviewed implementation and explicit owner approval.
-- **`public/app.js`**: a no-build SPA that renders HTML strings. Interpolated values must go through `escapeHtml`. The CSP forbids inline scripts and styles.
+- **`public/app.js`**: a no-build SPA that renders HTML strings into `#app` on every state change. Interpolated values must go through `escapeHtml`. Non-obvious parts:
+  - Hash routes `#overview`, `#controls`, `#schedule`, `#system`; `render()` rebuilds the page and restores focus to the element whose `data-focus` key matched before, so give new interactive elements a stable `data-focus`.
+  - Cloud writes go through `queueWrite`/`commitWrite`: stepper presses are debounced (`WRITE_DELAY`) into one request, and the confirmed value is written into the in-memory leaf instead of refetching, to protect the ONECTA quota. Schedule writes still reload with `refresh=true`.
+  - The CSP (`style-src 'self'`) blocks `style=""` attributes as well as `<style>` tags. Dynamic colours and sizes (the temperature `thermal()` ramp, dials, timelines, charts) are SVG presentation attributes (`stroke`, `fill`, `%` widths); CSS rules can still override them.
+  - Colour carries meaning: the thermal ramp is used only for temperatures. Tokens live on `:root` in `public/styles.css` with a `prefers-color-scheme: dark` override.
+  - `public/index.html` loads `styles.css?v=N` and `app.js?v=N`, and static files are cached for 5 minutes. Bump `N` whenever either file changes, or browsers and the hosted site keep the old version.
+- **Home profile**: `sanitizeHouse` in `src/app-handler.js` whitelists every field through `HOUSE_RANGES`/`HOUSE_CHOICES` (plus `rooms`, `timeZone`); an unknown field is silently dropped. A new profile field needs an entry there, a form control in `houseForm()` in `public/app.js`, and usually a rule in `src/lib/efficiency.js`. Owner-specific facts about the house (envelope, rooms, constraints such as "no basement insulation for now") are recorded in `docs/EFFICIENCY_PLAYBOOK.md`, not in code.
 
 ## Constraints to preserve
 
@@ -75,7 +84,5 @@ Environment variables: `HOST` (default `127.0.0.1`), `PORT` (8787), `DATA_DIR` (
 2. Map the real device's management points, actions, schedules, enum values, ranges and units from a redacted payload.
 3. Sign in to the hosted UI with the application password, then verify the migrated ONECTA connection and device refresh.
 4. Make **Disconnect cloud** revoke tokens at Daikin. `disconnect()` currently only deletes the locally stored tokens; treat that as a documented gap until it is fixed and tested.
-5. Continue optional A71 protocol research only as scoped in `RESEARCH_STATUS.md`.
-6. Continue optional A71 analysis from the verified provisioning API, keeping
-   all further requests read-only unless a specific state-changing experiment
-   is separately reviewed and explicitly approved.
+5. Continue optional A71 research only as scoped in `RESEARCH_STATUS.md`, building on the verified provisioning API and keeping every request read-only unless a specific state-changing experiment is separately reviewed and explicitly approved.
+6. Once the device appears, run the energy review in `docs/EFFICIENCY_PLAYBOOK.md`: `scripts/efficiency-audit.mjs`, confirm the ONECTA consumption-array alignment and schedule format, collect the installer-menu photos, then write the personalised recommendations. Suggestions stay proposals; change one setting at a time and only with the owner's approval.
